@@ -151,6 +151,7 @@ final class AppState {
     var calendarAccessGranted: Bool { calendarMonitor.accessGranted }
 
     let client: BusyBarClient
+    private let localNetworkPermissionTrigger = LocalNetworkPermissionTrigger()
     private let micMonitor = MicMonitor()
     private let notificationWatcher = NotificationWatcher()
     private let calendarMonitor = CalendarMonitor()
@@ -205,6 +206,12 @@ final class AppState {
         self.pingHost = defaults.string(forKey: "pingHost") ?? "1.1.1.1"
         self.weatherCelsius = defaults.bool(forKey: "weatherCelsius")
         self.client = BusyBarClient(host: host, token: token)
+        localNetworkPermissionTrigger.onAccessAvailable = { [weak self] in
+            Task { @MainActor [weak self] in
+                await self?.refreshDeviceStatus()
+            }
+        }
+        localNetworkPermissionTrigger.requestAccess()
         slackSync.token = self.slackToken
         syncPingLoop()
         syncWeatherLoop()
