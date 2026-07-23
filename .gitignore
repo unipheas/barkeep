@@ -1,0 +1,8 @@
+.build/
+dist/
+.DS_Store
+*.xcodeproj
+.swiftpm/
+assets/AppIcon.iconset/
+assets/preview.png
+PUBLISHING.md

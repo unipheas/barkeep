@@ -1,0 +1,132 @@
+#!/bin/zsh
+# barkeep — control a Busy Bar over its local HTTP API from the terminal.
+#
+#   barkeep send "text" [-c color] [-f font] [-t seconds] [-l ledcolor]
+#   barkeep busy [on|off] [-T theme]
+#   barkeep timer <minutes>
+#   barkeep pomodoro [work_min] [rest_min] [cycles]
+#   barkeep clear
+#   barkeep sound
+#   barkeep status
+#
+# Env: BARKEEP_HOST (default 10.0.4.20), BARKEEP_THEME (default on_air)
+set -o pipefail
+
+HOST="${BARKEEP_HOST:-10.0.4.20}"
+API="http://$HOST/api"
+THEME="${BARKEEP_THEME:-on_air}"
+CURL=/usr/bin/curl
+
+die() { print -u2 -- "barkeep: $1"; exit 1 }
+
+json_escape() {
+    local s="$1"
+    s="${s//\\/\\\\}"
+    s="${s//\"/\\\"}"
+    print -rn -- "$s"
+}
+
+color_hex() {
+    case "$1" in
+        white)  print -n '#FFFFFFFF' ;;
+        red)    print -n '#FF3B30FF' ;;
+        green)  print -n '#34C759FF' ;;
+        blue)   print -n '#0A84FFFF' ;;
+        yellow) print -n '#FFD60AFF' ;;
+        orange) print -n '#FF9500FF' ;;
+        purple) print -n '#BF5AF2FF' ;;
+        cyan)   print -n '#32ADE6FF' ;;
+        pink)   print -n '#FF2D55FF' ;;
+        \#*)    print -n "$1" ;;
+        *)      die "unknown color '$1' (use a name or #RRGGBBAA)" ;;
+    esac
+}
+
+api() {
+    local method=$1 path=$2 body=$3
+    local out
+    if [[ -n "$body" ]]; then
+        out=$($CURL -sS -m 8 -X "$method" "$API$path" -H 'Content-Type: application/json' -d "$body") || die "cannot reach bar at $HOST"
+    else
+        out=$($CURL -sS -m 8 -X "$method" "$API$path") || die "cannot reach bar at $HOST"
+    fi
+    if [[ "$out" == *'"error"'* ]]; then
+        die "device error: $out"
+    fi
+    print -rn -- "$out"
+}
+
+snapshot() {
+    local snap=$1
+    api PUT /busy/snapshot "{\"snapshot\":$snap,\"snapshot_timestamp_ms\":$(( $(date +%s) * 1000 ))}" >/dev/null
+}
+
+bar_settings() {
+    print -rn -- "{\"theme\":\"$1\",\"show_work_phase_only\":false,\"trigger_smart_home\":true}"
+}
+
+cmd=$1
+[[ -n "$cmd" ]] && shift
+
+case "$cmd" in
+send)
+    text=$1
+    [[ -n "$text" ]] || die "usage: barkeep send \"text\" [-c color] [-f font] [-t seconds] [-l ledcolor]"
+    shift
+    color='#FFFFFFFF' font=normal seconds=30 led=''
+    while getopts "c:f:t:l:" opt; do
+        case $opt in
+            c) color=$(color_hex "$OPTARG") || exit 1 ;;
+            f) font=$OPTARG ;;
+            t) seconds=$OPTARG ;;
+            l) led=$(color_hex "$OPTARG") || exit 1 ;;
+        esac
+    done
+    # Device fonts are ASCII bitmap fonts; strip anything else.
+    text=$(print -rn -- "$text" | LC_ALL=C tr -cd '\40-\176')
+    [[ -n "$text" ]] || die "message is empty after removing non-ASCII characters"
+    el="{\"id\":\"cli\",\"type\":\"text\",\"text\":\"$(json_escape "$text")\",\"font\":\"$font\",\"color\":\"$color\",\"align\":\"mid_left\",\"x\":0,\"y\":8,\"width\":72,\"scroll_rate\":2500,\"scroll_start_delay\":800,\"scroll_repeat_delay\":1500,\"timeout\":$seconds,\"display\":\"front\"}"
+    payload="{\"application_name\":\"busybar_cli\",\"priority\":95,\"elements\":[$el]"
+    [[ -n "$led" ]] && payload+=",\"led_notification_color\":\"$led\""
+    payload+="}"
+    api POST /display/draw "$payload" >/dev/null
+    ;;
+busy)
+    sub=${1:-on}
+    [[ "$2" == "-T" && -n "$3" ]] && THEME=$3
+    if [[ "$sub" == on ]]; then
+        snapshot "{\"type\":\"INFINITE\",\"card_id\":\"00000000-0000-0000-0000-000000000000\",\"is_paused\":false,\"busy_bar_settings\":$(bar_settings "$THEME")}"
+    elif [[ "$sub" == off ]]; then
+        snapshot "{\"type\":\"NOT_STARTED\",\"busy_bar_settings\":$(bar_settings busy)}"
+    else
+        die "usage: barkeep busy [on|off] [-T theme]"
+    fi
+    ;;
+timer)
+    minutes=$1
+    [[ "$minutes" == <-> && $minutes -gt 0 ]] || die "usage: barkeep timer <minutes>"
+    snapshot "{\"type\":\"SIMPLE\",\"card_id\":\"00000000-0000-0000-0000-000000000000\",\"time_left_ms\":$(( minutes * 60000 )),\"is_paused\":false,\"busy_bar_settings\":$(bar_settings "$THEME")}"
+    ;;
+pomodoro)
+    work=${1:-25} rest=${2:-5} cycles=${3:-4}
+    work_ms=$(( work * 60000 ))
+    snapshot "{\"type\":\"INTERVAL\",\"card_id\":\"00000000-0000-0000-0000-000000000000\",\"current_interval\":1,\"current_interval_time_total_ms\":$work_ms,\"current_interval_time_left_ms\":$work_ms,\"is_paused\":false,\"interval_settings\":{\"type\":\"INTERVAL\",\"interval_work_ms\":$work_ms,\"interval_rest_ms\":$(( rest * 60000 )),\"interval_work_cycles_count\":$cycles,\"is_autostart_enabled\":false},\"busy_bar_settings\":$(bar_settings "$THEME")}"
+    ;;
+clear)
+    api DELETE "/display/draw?application_name=busybar_cli" >/dev/null
+    api DELETE "/display/draw?application_name=busybar_mac" >/dev/null
+    ;;
+sound)
+    api POST /audio/play "{\"application_name\":\"busybar_cli\",\"stock_path\":\"shared/calendar_event_starts.snd\"}" >/dev/null
+    ;;
+status)
+    api GET /status
+    print
+    api GET /busy/snapshot
+    print
+    ;;
+*)
+    sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+    exit 1
+    ;;
+esac
