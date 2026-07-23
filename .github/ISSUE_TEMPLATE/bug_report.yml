@@ -1,0 +1,83 @@
+name: Bug report
+description: Report a reproducible problem with BarKeep
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve BarKeep. Do not include passwords, tokens,
+        private notifications, calendar details, or signing credentials.
+        Security vulnerabilities should be reported privately.
+  - type: input
+    id: version
+    attributes:
+      label: BarKeep version
+      description: Shown at the bottom-right of the BarKeep menu.
+      placeholder: "1.0.13"
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: Installation method
+      options:
+        - Homebrew cask
+        - GitHub release
+        - Built from source
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: "macOS 15.5"
+    validations:
+      required: true
+  - type: input
+    id: firmware
+    attributes:
+      label: Busy Bar firmware version
+      placeholder: "1.0.2"
+    validations:
+      required: true
+  - type: dropdown
+    id: transport
+    attributes:
+      label: Connection
+      options:
+        - USB
+        - Wi-Fi
+        - Both
+        - Not device-related
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Include the smallest reliable sequence that triggers the problem.
+      placeholder: |
+        1. Open BarKeep
+        2. Select…
+        3. Observe…
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add sanitized logs or screenshots if they help explain the issue.
