@@ -115,9 +115,10 @@ trust the three BarKeep commands. Codex and ChatGPT desktop share these hooks.
 
 | Feature | Permission | Why |
 |---|---|---|
+| Busy Bar connection | Local Network | Required for the bar's local HTTP API over both its USB network interface and Wi-Fi. BarKeep asks on first launch. |
 | Notification forwarding | Full Disk Access | macOS stores delivered notifications in a TCC-protected SQLite DB (`~/Library/Group Containers/group.com.apple.usernoted/db2/db`). BarKeep polls it read-only; only titles/bodies matching your app filter are read, and they go straight to the bar over your local USB or Wi-Fi connection. |
 | Calendar auto-busy | Calendar (full access) | To know when you're in an event. |
-| Everything else | none | Mic detection reads CoreAudio device state, not audio. |
+| Microphone detection | None | Mic detection reads CoreAudio device state, not audio. |
 
 Grant Full Disk Access in System Settings → Privacy & Security → Full Disk
 Access → add the installed `BarKeep.app`. Official release builds use a stable
