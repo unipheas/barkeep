@@ -174,11 +174,14 @@ Bar. Return to the Arcade tab and click **Capture Keyboard** to resume controls.
 
 Everything is configured in the app's Settings tab — device host, local HTTP API password (needed for Wi-Fi), busy theme, notification filter, Slack token, ping target, weather unit and location (type a city, it's geocoded for you; leave empty for automatic IP-based location). No config files, no terminal required.
 
-CLI env: `BARKEEP_HOST` (device address, default `10.0.4.20`), `BARKEEP_THEME` (busy theme, default `on_air`).
+CLI env: `BARKEEP_HOST` (device address, default `10.0.4.20`),
+`BARKEEP_TOKEN` (the local HTTP API password for Wi-Fi), and
+`BARKEEP_THEME` (busy theme, default `on_air`).
 
 ## Device API notes
 
-Verified against firmware 1.0.2 / API 24.3.0 ([official docs](https://api.busy.app/busybar/docs)):
+Verified against firmware 1.0.2 / API 24.3.0
+([official local HTTP API docs](https://docs.busy.app/bar/dev/http-api)):
 
 - Over USB the API is served at `http://10.0.4.20/api/*` with no authentication. Over Wi-Fi, enable HTTP API access in the bar's local web interface, configure its numeric password, then enter that same password in BarKeep Settings. BarKeep sends it using the firmware API's documented `X-API-Token` header. API tokens generated at `cloud.busy.app` are for the internet API and do not authenticate requests to a local IP address. The docs' `/busybar/*` prefix is for the cloud proxy; BarKeep communicates with the device locally.
 - Text elements accept printable ASCII only (bitmap fonts); BarKeep renders emoji/unicode to PNGs and uploads them as assets.
