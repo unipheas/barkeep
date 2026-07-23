@@ -505,7 +505,7 @@ struct SettingsTab: View {
                     .onSubmit { state.applyDeviceName() }
             }
             LabeledContent("API token") {
-                SecureField("only needed over Wi-Fi/cloud", text: $state.token)
+                SecureField("needed for Wi-Fi", text: $state.token)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 140)
             }

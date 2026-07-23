@@ -1,8 +1,8 @@
 # BarKeep 👾
 
-A macOS menu bar companion for the [Busy Bar](https://busy.app) — control your bar over USB, automate your busy status, and turn the little LED display into a proper developer peripheral.
+A macOS menu bar companion for the [Busy Bar](https://busy.app) — control your bar over USB or Wi-Fi, automate your busy status, and turn the little LED display into a proper developer peripheral.
 
-No cloud, no account, no telemetry: BarKeep talks to the bar's local HTTP API over USB (`http://10.0.4.20/api`), which needs no authentication.
+No cloud, no account, no telemetry: BarKeep talks directly to the bar's local HTTP API, either over USB (`http://10.0.4.20/api`, no authentication) or Wi-Fi (the bar's local IP address and API token).
 
 ## Features
 
@@ -27,7 +27,7 @@ No cloud, no account, no telemetry: BarKeep talks to the bar's local HTTP API ov
 
 ## Install
 
-Requires macOS 14+ and a Busy Bar connected via USB.
+Requires macOS 14+ and a Busy Bar connected via USB or reachable on the same Wi-Fi network.
 
 ### Download
 
@@ -71,7 +71,7 @@ Claude Code hooks: see [hooks/](hooks/) — wire them up in `~/.claude/settings.
 
 | Feature | Permission | Why |
 |---|---|---|
-| Notification forwarding | Full Disk Access | macOS stores delivered notifications in a TCC-protected SQLite DB (`~/Library/Group Containers/group.com.apple.usernoted/db2/db`). BarKeep polls it read-only; only titles/bodies matching your app filter are read, and they go straight to the bar over USB. |
+| Notification forwarding | Full Disk Access | macOS stores delivered notifications in a TCC-protected SQLite DB (`~/Library/Group Containers/group.com.apple.usernoted/db2/db`). BarKeep polls it read-only; only titles/bodies matching your app filter are read, and they go straight to the bar over your local USB or Wi-Fi connection. |
 | Calendar auto-busy | Calendar (full access) | To know when you're in an event. |
 | Everything else | none | Mic detection reads CoreAudio device state, not audio. |
 
@@ -86,7 +86,7 @@ Grant Full Disk Access in System Settings → Privacy & Security → Full Disk A
 
 ## Configuration
 
-Everything is configured in the app's Settings tab — device host, API token (only needed over Wi-Fi/cloud), busy theme, notification filter, Slack token, ping target, weather unit and location (type a city, it's geocoded for you; leave empty for automatic IP-based location). No config files, no terminal required.
+Everything is configured in the app's Settings tab — device host, API token (needed for Wi-Fi), busy theme, notification filter, Slack token, ping target, weather unit and location (type a city, it's geocoded for you; leave empty for automatic IP-based location). No config files, no terminal required.
 
 CLI env: `BARKEEP_HOST` (device address, default `10.0.4.20`), `BARKEEP_THEME` (busy theme, default `on_air`).
 
@@ -94,7 +94,7 @@ CLI env: `BARKEEP_HOST` (device address, default `10.0.4.20`), `BARKEEP_THEME` (
 
 Verified against firmware 1.0.2 / API 24.3.0 ([official docs](https://api.busy.app/busybar/docs)):
 
-- Over USB the API is served at `http://10.0.4.20/api/*` with no auth (the docs' `/busybar/*` prefix is the cloud proxy). Wi-Fi/cloud need a bearer token — supported via Settings.
+- Over USB the API is served at `http://10.0.4.20/api/*` with no authentication. Over Wi-Fi, enter the bar's local IP address and bearer token in Settings. The docs' `/busybar/*` prefix is for the cloud proxy; BarKeep communicates with the device locally.
 - Text elements accept printable ASCII only (bitmap fonts); BarKeep renders emoji/unicode to PNGs and uploads them as assets.
 - `/api/screen` returns base64 of raw **GRB** pixel data (LED byte order), 72×16×3.
 - The firmware rejects *all* draw requests while a busy session is active, regardless of priority.
