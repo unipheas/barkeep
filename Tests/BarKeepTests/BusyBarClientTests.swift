@@ -2,22 +2,22 @@ import XCTest
 @testable import BarKeep
 
 final class BusyBarClientTests: XCTestCase {
-    func testDisplayPayloadUsesFirmwareAppIDNamespace() {
+    func testDisplayPayloadUsesFirmwareApplicationNamespace() {
         let payload = BusyBarClient.displayPayload(
             elements: [["id": "frame", "type": "image", "path": "arcade.png"]],
             priority: 95
         )
 
-        XCTAssertEqual(payload["app_id"] as? String, BusyBarClient.appName)
-        XCTAssertNil(payload["application_name"])
+        XCTAssertEqual(payload["application_name"] as? String, BusyBarClient.appName)
+        XCTAssertNil(payload["app_id"])
         XCTAssertEqual(payload["priority"] as? Int, 95)
     }
 
-    func testAssetUploadUsesSameFirmwareAppIDNamespace() {
+    func testAssetUploadUsesSameFirmwareApplicationNamespace() {
         let query = BusyBarClient.assetQuery(filename: "arcade.png")
 
-        XCTAssertEqual(query["app_id"], BusyBarClient.appName)
+        XCTAssertEqual(query["application_name"], BusyBarClient.appName)
         XCTAssertEqual(query["file"], "arcade.png")
-        XCTAssertNil(query["application_name"])
+        XCTAssertNil(query["app_id"])
     }
 }

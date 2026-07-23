@@ -206,7 +206,7 @@ final class BusyBarClient: @unchecked Sendable {
         ledColor: String? = nil
     ) -> [String: Any] {
         var payload: [String: Any] = [
-            "app_id": appName,
+            "application_name": appName,
             "priority": priority,
             "elements": elements,
         ]
@@ -217,7 +217,7 @@ final class BusyBarClient: @unchecked Sendable {
     }
 
     static func assetQuery(filename: String) -> [String: String] {
-        ["app_id": appName, "file": filename]
+        ["application_name": appName, "file": filename]
     }
 
     func drawText(_ text: String, font: TextFont, colorHex: String, timeout: Int, priority: Int, ledColor: String? = nil) async throws {
@@ -265,7 +265,7 @@ final class BusyBarClient: @unchecked Sendable {
     }
 
     func clearDisplay() async throws {
-        try await send(try request("DELETE", "/display/draw", query: ["app_id": Self.appName]))
+        try await send(try request("DELETE", "/display/draw", query: ["application_name": Self.appName]))
     }
 
     func drawCountdown(to date: Date, colorHex: String, timeout: Int, priority: Int) async throws {

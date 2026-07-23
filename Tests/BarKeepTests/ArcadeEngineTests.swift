@@ -2,6 +2,21 @@ import XCTest
 @testable import BarKeep
 
 final class ArcadeEngineTests: XCTestCase {
+    func testStoppingInvalidatesFrameWithoutAbandoningUpload() {
+        var lifecycle = ArcadeUploadLifecycle()
+        lifecycle.beginSession()
+        let uploadSession = lifecycle.beginUpload()
+
+        lifecycle.invalidateSession()
+
+        XCTAssertEqual(lifecycle.uploadSession, uploadSession)
+        XCTAssertFalse(
+            lifecycle.shouldDraw(uploadSession: uploadSession, isActive: false)
+        )
+        XCTAssertTrue(lifecycle.finishUpload(uploadSession))
+        XCTAssertNil(lifecycle.uploadSession)
+    }
+
     func testEveryGameRendersAVisibleNativeResolutionFrame() {
         for game in ArcadeGame.allCases {
             let engine = ArcadeEngine(game: game)

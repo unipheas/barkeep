@@ -4,6 +4,34 @@ import os
 
 private let arcadeLog = Logger(subsystem: "dev.barkeep.mac", category: "arcade")
 
+struct ArcadeUploadLifecycle {
+    private(set) var session = 0
+    private(set) var uploadSession: Int?
+
+    mutating func beginSession() {
+        session += 1
+    }
+
+    mutating func beginUpload() -> Int {
+        uploadSession = session
+        return session
+    }
+
+    mutating func invalidateSession() {
+        session += 1
+    }
+
+    func shouldDraw(uploadSession: Int, isActive: Bool) -> Bool {
+        isActive && uploadSession == session
+    }
+
+    mutating func finishUpload(_ finishedSession: Int) -> Bool {
+        guard uploadSession == finishedSession else { return false }
+        uploadSession = nil
+        return true
+    }
+}
+
 private final class ArcadeInputPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
@@ -130,7 +158,7 @@ final class ArcadeController {
     private var uploadSlot = 0
     private var lastUpload = ContinuousClock.now
     private var nextUploadAllowed = ContinuousClock.now
-    private var generation = 0
+    private var uploadLifecycle = ArcadeUploadLifecycle()
     private var consecutiveFailures = 0
 
     init(client: BusyBarClient) {
@@ -146,7 +174,7 @@ final class ArcadeController {
         }
         selectedGame = game
         engine.select(game)
-        generation += 1
+        uploadLifecycle.beginSession()
         isActive = true
         framesSent = 0
         framesDropped = 0
@@ -198,12 +226,13 @@ final class ArcadeController {
 
     private func stop(withError error: String?) {
         guard isActive else { return }
-        generation += 1
+        uploadLifecycle.invalidateSession()
         isActive = false
         gameTask?.cancel()
         gameTask = nil
-        uploadTask?.cancel()
-        uploadTask = nil
+        // URLSession cancellation can leave a partially overwritten PNG in
+        // the device asset slot. Let the current upload finish; generation
+        // checks below prevent its stale frame from being drawn.
         heldKeys.removeAll()
         pressedKeys.removeAll()
         controlsCaptured = false
@@ -246,24 +275,41 @@ final class ArcadeController {
             return
         }
         lastUpload = now
-        let frameGeneration = generation
+        let frameGeneration = uploadLifecycle.beginUpload()
         let filename = "arcade\(uploadSlot).png"
         uploadSlot = (uploadSlot + 1) % 2
         uploadTask = Task { [weak self] in
             guard let self else { return }
             do {
                 try await self.client.uploadAsset(filename: filename, data: png)
-                guard self.isActive, self.generation == frameGeneration else { return }
+                guard self.uploadLifecycle.shouldDraw(
+                    uploadSession: frameGeneration,
+                    isActive: self.isActive
+                ) else {
+                    if self.uploadLifecycle.finishUpload(frameGeneration) {
+                        self.uploadTask = nil
+                    }
+                    return
+                }
                 try await self.client.drawImage(
-                    named: filename, timeout: 6, priority: 95
+                    named: filename, timeout: 1, priority: 99
                 )
                 self.framesSent += 1
                 self.consecutiveFailures = 0
                 self.nextUploadAllowed = .now
                 self.errorMessage = nil
             } catch is CancellationError {
-                // Stopping the arcade intentionally cancels an in-flight frame.
+                // Process shutdown can still cancel URLSession work.
             } catch {
+                guard self.uploadLifecycle.shouldDraw(
+                    uploadSession: frameGeneration,
+                    isActive: self.isActive
+                ) else {
+                    if self.uploadLifecycle.finishUpload(frameGeneration) {
+                        self.uploadTask = nil
+                    }
+                    return
+                }
                 arcadeLog.error("Arcade frame failed: \(error.localizedDescription, privacy: .public)")
                 self.errorMessage = error.localizedDescription
                 self.consecutiveFailures += 1
@@ -276,7 +322,7 @@ final class ArcadeController {
                     self.stop(withError: "Arcade stopped after repeated connection failures.")
                 }
             }
-            if self.generation == frameGeneration {
+            if self.uploadLifecycle.finishUpload(frameGeneration) {
                 self.uploadTask = nil
             }
         }
