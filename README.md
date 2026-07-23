@@ -65,6 +65,20 @@ open -a BarKeep
 
 The running app version is shown at the bottom-right of its menu.
 
+### Connect the Busy Bar
+
+USB works at the fixed address `10.0.4.20` and does not require a password.
+For Wi-Fi:
+
+1. Open the Busy Bar's web interface and go to **Network → HTTP API**.
+2. Enable HTTP API access and set its local numeric password.
+3. In BarKeep → **Settings**, enter the bar's Wi-Fi IP address and that same
+   password in **Wi-Fi password**.
+
+The password is the one configured on the physical bar. Tokens created at
+`cloud.busy.app` are for the cloud API and will be rejected by the local
+device API.
+
 ### From source
 
 ```bash
@@ -113,9 +127,12 @@ To notify the Busy Bar whenever Codex or ChatGPT desktop finishes a turn and
 waits for you, add this top-level setting to `~/.codex/config.toml`:
 
 ```toml
+# Apple Silicon Homebrew
 notify = ["/opt/homebrew/opt/barkeep-cli/share/barkeep-cli/hooks/codex-notify.sh"]
 ```
 
+On an Intel Mac, use
+`/usr/local/opt/barkeep-cli/share/barkeep-cli/hooks/codex-notify.sh` instead.
 The notifier also forwards the event to Codex Computer Use when that helper is
 installed. Restart Codex/ChatGPT desktop after changing the setting.
 
@@ -177,6 +194,20 @@ Everything is configured in the app's Settings tab — device host, local HTTP A
 CLI env: `BARKEEP_HOST` (device address, default `10.0.4.20`),
 `BARKEEP_TOKEN` (the local HTTP API password for Wi-Fi), and
 `BARKEEP_THEME` (busy theme, default `on_air`).
+
+### Connection troubleshooting
+
+- **Unreachable over USB:** reconnect the cable, wait a few seconds for the
+  USB network interface, and leave the host set to `10.0.4.20`.
+- **Unreachable over Wi-Fi:** confirm the Mac and Busy Bar can communicate on
+  the same network. Guest networks and some phone hotspots isolate clients.
+- **Token rejected / HTTP 403:** use the local numeric HTTP API password from
+  the bar's own web interface, not a token from `cloud.busy.app`.
+- **No Local Network prompt:** open System Settings → Privacy & Security →
+  Local Network and enable BarKeep. If it is already enabled, toggle it off
+  and back on, then relaunch BarKeep.
+- **Pasted a full URL:** BarKeep accepts either an IP/hostname or a URL such as
+  `http://busy-bar.local/login` and normalizes it to the device host.
 
 ## Device API notes
 
