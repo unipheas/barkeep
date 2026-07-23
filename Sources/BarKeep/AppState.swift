@@ -151,6 +151,7 @@ final class AppState {
     var calendarAccessGranted: Bool { calendarMonitor.accessGranted }
 
     let client: BusyBarClient
+    let arcade: ArcadeController
     private let localNetworkPermissionTrigger = LocalNetworkPermissionTrigger()
     private let micMonitor = MicMonitor()
     private let notificationWatcher = NotificationWatcher()
@@ -206,6 +207,7 @@ final class AppState {
         self.pingHost = defaults.string(forKey: "pingHost") ?? "1.1.1.1"
         self.weatherCelsius = defaults.bool(forKey: "weatherCelsius")
         self.client = BusyBarClient(host: host, token: token)
+        self.arcade = ArcadeController(client: self.client)
         localNetworkPermissionTrigger.onAccessAvailable = { [weak self] in
             Task { @MainActor [weak self] in
                 await self?.refreshDeviceStatus()
@@ -245,6 +247,9 @@ final class AppState {
             firmwareVersion = status.firmware.version
             let busyType = try await client.currentBusyType()
             onCall = busyType != "NOT_STARTED"
+            if onCall, arcade.isActive {
+                arcade.stop()
+            }
             if let themes = try? await client.listThemes(), !themes.isEmpty {
                 availableThemes = themes
             }
@@ -256,6 +261,9 @@ final class AppState {
         } catch {
             deviceReachable = false
             batteryCharge = nil
+            if arcade.isActive {
+                arcade.stop()
+            }
         }
     }
 
@@ -395,7 +403,7 @@ final class AppState {
                 self.latestPingMs = ms
                 // The badge self-expires (10 s timeout), so a stopped loop
                 // or an active busy session just lets it fade out.
-                if !self.onCall {
+                if !self.onCall && !self.arcade.isActive {
                     let text: String
                     let color: String
                     if let ms {
@@ -470,7 +478,7 @@ final class AppState {
                         lastFetch = Date()
                     }
                 }
-                if let reading = self.latestWeather, !self.onCall {
+                if let reading = self.latestWeather, !self.onCall, !self.arcade.isActive {
                     var iconOK = self.lastWeatherIconEmoji == reading.emoji
                     if !iconOK, let png = MessageRenderer.renderEmojiIcon(reading.emoji) {
                         iconOK = (try? await self.client.uploadAsset(filename: "wx.png", data: png)) != nil
@@ -494,6 +502,10 @@ final class AppState {
 
     func sendMeetingCountdown() {
         guard let date = nextMeetingDate else { return }
+        guard !arcade.isActive else {
+            lastError = "Stop the arcade before drawing another item."
+            return
+        }
         Task {
             do {
                 try await client.drawCountdown(to: date, colorHex: "#FFAA00FF", timeout: 0, priority: 95)
@@ -534,6 +546,9 @@ final class AppState {
     func setOnCall(_ on: Bool, automatic: Bool = false) {
         Task {
             do {
+                if on, arcade.isActive {
+                    arcade.stop()
+                }
                 if on && automatic {
                     // Don't stomp a busy session the user started elsewhere.
                     let current = try await client.currentBusyType()
@@ -563,6 +578,7 @@ final class AppState {
     // MARK: - Notification forwarding
 
     private func handleNotification(_ note: ForwardedNotification) {
+        guard !arcade.isActive else { return }
         let filters = notificationAppFilter
             .split(separator: ",")
             .map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
@@ -646,6 +662,10 @@ final class AppState {
     // MARK: - Messages
 
     func sendMessage(_ text: String, font: TextFont, color: NSColor, timeoutSeconds: Int) {
+        guard !arcade.isActive else {
+            lastError = "Stop the arcade before sending a message."
+            return
+        }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         let hex = MessageRenderer.rgbaHex(from: color)
@@ -674,6 +694,10 @@ final class AppState {
     }
 
     func sendDrawing(_ grid: [[String?]], timeoutSeconds: Int) {
+        guard !arcade.isActive else {
+            lastError = "Stop the arcade before sending a drawing."
+            return
+        }
         Task {
             do {
                 guard let png = MessageRenderer.renderGridToPNG(grid) else {

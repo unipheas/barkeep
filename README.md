@@ -6,7 +6,7 @@ No cloud, no account, no telemetry: BarKeep talks directly to the bar's local HT
 
 ## Features
 
-**Menu bar app** (tabbed popover: Device / Message / Timers / Settings)
+**Menu bar app** (tabbed popover: Device / Message / Timers / Arcade / Settings)
 
 - 🎙 **Auto On-Call** — flips the bar to *On Air* the moment any app opens your microphone (Teams, Zoom, FaceTime…), clears when the mic goes idle. Uses CoreAudio device state — no microphone permission needed, no audio ever captured.
 - 📺 **Live preview** — see what's on the bar's display, right in the popover.
@@ -16,6 +16,9 @@ No cloud, no account, no telemetry: BarKeep talks directly to the bar's local HT
 - 📅 **Calendar** — auto-busy during calendar events; one-click countdown-to-next-meeting on the bar.
 - 🔔 **Notification forwarding** — scroll macOS notifications (Teams by default, any app by filter) across the bar with per-app LED colors, optional chime, and queue-during-calls replay.
 - 🌐 **Ambient widgets** — live ping latency badge and local weather (icon + temperature) in the corners of the display.
+- 🕹 **Busy Bar Arcade** — play Snake, Tetris, Pong, and Breakout on the
+  physical 72×16 display using your Mac keyboard. The Mac preview is optional
+  and off by default.
 - 💤 **Slack sync** — bar goes busy → your Slack status becomes "🎧 On a call" + DND; clears after.
 - ⚙️ Brightness/volume control, device rename, firmware update check, launch at login.
 
@@ -131,6 +134,28 @@ ad-hoc-signed copies may require the permission to be granted again.
 2. *OAuth & Permissions* → **User Token Scopes**: `users.profile:write`, `dnd:write`
 3. *Install to Workspace*, copy the **User OAuth Token** (`xoxp-…`)
 4. Paste into BarKeep → Settings → Slack
+
+## Busy Bar Arcade
+
+Open BarKeep → **Arcade**, then choose a game. BarKeep captures keyboard input
+in a transparent input-only window, so the physical Busy Bar is the game
+display and no game window needs to remain visible on the Mac.
+
+| Key | Action |
+|---|---|
+| `1` / `2` / `3` / `4` | Switch to Snake / Tetris / Pong / Breakout |
+| Arrow keys | Move (all games) |
+| `W` / `S` | Alternate Pong controls |
+| `↑` | Rotate a Tetris piece |
+| `↓` | Soft-drop a Tetris piece |
+| Space | Hard-drop a Tetris piece |
+| `R` | Restart the current game |
+| Escape | Stop the arcade and return keyboard focus to the previous Mac app |
+
+Enable **Show preview in BarKeep** if you want a troubleshooting preview in
+the Arcade tab. Games cannot run while a native busy/timer session is active,
+because Busy Bar firmware rejects custom drawing during those sessions.
+Starting an on-call session stops the arcade automatically.
 
 ## Configuration
 

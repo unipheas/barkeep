@@ -13,7 +13,8 @@ struct MenuView: View {
                 Text("Device").tag(0)
                 Text("Message").tag(1)
                 Text("Timers").tag(2)
-                Text("Settings").tag(3)
+                Text("Arcade").tag(3)
+                Text("Settings").tag(4)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -22,6 +23,7 @@ struct MenuView: View {
             case 0: DeviceTab()
             case 1: MessageTab()
             case 2: TimersTab()
+            case 3: ArcadeTab()
             default: SettingsTab()
             }
 
@@ -89,6 +91,114 @@ struct MenuView: View {
             .buttonStyle(.borderless)
             .help("Quit BarKeep")
         }
+    }
+}
+
+// MARK: - Arcade tab
+
+@MainActor
+struct ArcadeTab: View {
+    @Environment(AppState.self) private var state
+
+    var body: some View {
+        @Bindable var arcade = state.arcade
+        VStack(alignment: .leading, spacing: 10) {
+            if state.onCall {
+                Text("End the current busy session before starting a game.")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+            } else if !state.deviceReachable {
+                Text("Connect the Busy Bar before starting a game.")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+            }
+
+            if arcade.showPreview, let image = arcade.previewImage {
+                Image(decorative: image, scale: 1)
+                    .resizable()
+                    .interpolation(.none)
+                    .aspectRatio(72.0 / 16.0, contentMode: .fit)
+                    .padding(4)
+                    .background(.black, in: RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
+            }
+
+            ForEach(ArcadeGame.allCases) { game in
+                HStack {
+                    Text("\(game.number)")
+                        .font(.caption.monospaced().bold())
+                        .frame(width: 18, height: 18)
+                        .foregroundStyle(Color(nsColor: nsColor(game.color)))
+                        .background(.quaternary, in: RoundedRectangle(cornerRadius: 4))
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(game.title)
+                            .font(.subheadline.bold())
+                        Text(game.controls)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    Button(
+                        arcade.isActive && arcade.selectedGame == game
+                            ? "Restart" : "Play"
+                    ) {
+                        if arcade.isActive && arcade.selectedGame == game {
+                            arcade.restart()
+                        } else {
+                            arcade.start(game)
+                        }
+                    }
+                    .controlSize(.small)
+                    .disabled(state.onCall || !state.deviceReachable)
+                }
+            }
+
+            Divider()
+
+            if arcade.isActive {
+                HStack {
+                    Circle()
+                        .fill(.green)
+                        .frame(width: 8, height: 8)
+                    Text("Playing \(arcade.selectedGame.title)")
+                        .font(.caption.bold())
+                    Spacer()
+                    Button("Stop") { arcade.stop() }
+                        .controlSize(.small)
+                }
+                Text("Keyboard captured · 1–4 switch games · R restarts · Esc stops")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text("\(arcade.framesSent) frames sent · \(arcade.framesDropped) skipped")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.tertiary)
+            } else {
+                Text("After Play, use the Mac keyboard while watching the Busy Bar. Press Esc to stop and return keyboard focus to your previous app.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Toggle("Show preview in BarKeep", isOn: $arcade.showPreview)
+                .toggleStyle(.checkbox)
+                .font(.caption)
+
+            if let error = arcade.errorMessage {
+                Text(error)
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+                    .lineLimit(2)
+            }
+        }
+    }
+
+    private func nsColor(_ color: ArcadeColor) -> NSColor {
+        NSColor(
+            deviceRed: CGFloat(color.red) / 255,
+            green: CGFloat(color.green) / 255,
+            blue: CGFloat(color.blue) / 255,
+            alpha: 1
+        )
     }
 }
 
