@@ -3,6 +3,14 @@ import XCTest
 @testable import BarKeep
 
 final class MenuBarWindowSizerTests: XCTestCase {
+    func testContentSizePreferenceDoesNotLoseMeasurementToZero() {
+        var size = CGSize(width: 340, height: 360)
+
+        MenuContentSizeKey.reduce(value: &size) { .zero }
+
+        XCTAssertEqual(size, CGSize(width: 340, height: 360))
+    }
+
     func testResizePreservesTopEdge() {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 340, height: 600),

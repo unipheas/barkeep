@@ -33,7 +33,9 @@ Requires macOS 14+ and a Busy Bar connected via USB or reachable on the same Wi-
 
 Grab `BarKeep-x.y.z.zip` from [Releases](https://github.com/unipheas/barkeep/releases), unzip, and move `BarKeep.app` to /Applications.
 
-BarKeep is open source and not notarized (no paid Apple Developer account), so macOS warns on first launch: right-click the app → **Open** → **Open**, or run `xattr -dr com.apple.quarantine /Applications/BarKeep.app`. If you'd rather build it yourself, use the source instructions below.
+Release builds are signed with a Developer ID certificate and notarized by
+Apple, so they open normally through Gatekeeper. If you'd rather build it
+yourself, use the source instructions below.
 
 ### Homebrew
 
@@ -68,7 +70,10 @@ cd barkeep
 ./make-app.sh
 ```
 
-This builds and launches `dist/BarKeep.app` (menu bar only, no Dock icon). Signing uses your first Apple Development identity if you have one, `$BARKEEP_SIGN_IDENTITY` if set, or falls back to ad-hoc.
+This builds and launches `dist/BarKeep.app` (menu bar only, no Dock icon).
+Signing prefers a Developer ID Application identity, then Apple Development,
+or `$BARKEEP_SIGN_IDENTITY` when explicitly set; otherwise it falls back to
+ad-hoc.
 
 Optional extras:
 
@@ -114,7 +119,10 @@ trust the three BarKeep commands. Codex and ChatGPT desktop share these hooks.
 | Calendar auto-busy | Calendar (full access) | To know when you're in an event. |
 | Everything else | none | Mic detection reads CoreAudio device state, not audio. |
 
-Grant Full Disk Access in System Settings → Privacy & Security → Full Disk Access → add the installed `BarKeep.app`. **Note:** macOS ties the grant to the app's code signature — with ad-hoc signing you may need to re-grant after rebuilding or upgrading; with a real identity it sticks.
+Grant Full Disk Access in System Settings → Privacy & Security → Full Disk
+Access → add the installed `BarKeep.app`. Official release builds use a stable
+Developer ID signature so the grant persists across upgrades. Locally rebuilt,
+ad-hoc-signed copies may require the permission to be granted again.
 
 ## Slack setup
 
