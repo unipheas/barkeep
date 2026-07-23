@@ -109,10 +109,20 @@ codex mcp add barkeep \
 Restart ChatGPT desktop, Codex, or the IDE extension after adding the server.
 Use `/mcp` to confirm that `barkeep` is connected.
 
-For the same automatic task-finished and needs-input signals as Claude Code,
-merge [`hooks/codex-hooks.json`](hooks/codex-hooks.json) into
-`~/.codex/hooks.json`, restart Codex/ChatGPT desktop, then open `/hooks` and
-trust the three BarKeep commands. Codex and ChatGPT desktop share these hooks.
+To notify the Busy Bar whenever Codex or ChatGPT desktop finishes a turn and
+waits for you, add this top-level setting to `~/.codex/config.toml`:
+
+```toml
+notify = ["/opt/homebrew/opt/barkeep-cli/share/barkeep-cli/hooks/codex-notify.sh"]
+```
+
+The notifier also forwards the event to Codex Computer Use when that helper is
+installed. Restart Codex/ChatGPT desktop after changing the setting.
+
+For permission-request signals and long-task timing, merge
+[`hooks/codex-hooks.json`](hooks/codex-hooks.json) into
+`~/.codex/hooks.json`, restart the app, then open `/hooks` and trust the three
+BarKeep commands.
 
 ## Permissions
 
