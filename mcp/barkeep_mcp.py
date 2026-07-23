@@ -3,6 +3,8 @@
 
 Tools: bar_send_message, bar_set_busy, bar_start_timer, bar_clear, bar_status.
 Host defaults to the USB address (10.0.4.20); override with BARKEEP_HOST.
+For Wi-Fi, BARKEEP_TOKEN is the local HTTP API password configured on the bar,
+not a cloud.busy.app API token.
 """
 import json
 import os
@@ -85,7 +87,7 @@ def api(method, path, body=None, query=None):
     if data:
         req.add_header("Content-Type", "application/json")
     if TOKEN:
-        req.add_header("Authorization", f"bearer {TOKEN}")
+        req.add_header("X-API-Token", TOKEN)
     with urllib.request.urlopen(req, timeout=8) as resp:
         return json.loads(resp.read().decode() or "{}")
 

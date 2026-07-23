@@ -19,7 +19,13 @@ final class AppState {
     // MARK: - Settings (persisted)
 
     var host: String {
-        didSet { UserDefaults.standard.set(host, forKey: "host"); client.host = host }
+        didSet {
+            UserDefaults.standard.set(host, forKey: "host")
+            client.host = host
+            if !deviceReachable {
+                transportType = Self.configuredTransport(for: host)
+            }
+        }
     }
     var token: String {
         didSet { UserDefaults.standard.set(token, forKey: "token"); client.token = token }
@@ -117,6 +123,7 @@ final class AppState {
     private(set) var activeMicrophoneNames: [String] = []
     private(set) var onCall = false
     private(set) var deviceReachable = false
+    private(set) var authenticationRejected = false
     private(set) var batteryCharge: Int?
     private(set) var firmwareVersion: String?
     private(set) var availableThemes = [
@@ -207,6 +214,7 @@ final class AppState {
         self.pingHost = defaults.string(forKey: "pingHost") ?? "1.1.1.1"
         self.weatherCelsius = defaults.bool(forKey: "weatherCelsius")
         self.client = BusyBarClient(host: host, token: token)
+        self.transportType = Self.configuredTransport(for: host)
         self.arcade = ArcadeController(client: self.client)
         localNetworkPermissionTrigger.onAccessAvailable = { [weak self] in
             Task { @MainActor [weak self] in
@@ -243,6 +251,7 @@ final class AppState {
         do {
             let status = try await client.status()
             deviceReachable = true
+            authenticationRejected = false
             batteryCharge = status.power.battery_charge
             firmwareVersion = status.firmware.version
             let busyType = try await client.currentBusyType()
@@ -260,11 +269,23 @@ final class AppState {
             if let value = try? await client.deviceName() { deviceNameText = value }
         } catch {
             deviceReachable = false
+            authenticationRejected = Self.isAuthenticationError(error)
             batteryCharge = nil
+            transportType = Self.configuredTransport(for: host)
             if arcade.isActive {
                 arcade.stop()
             }
         }
+    }
+
+    nonisolated static func configuredTransport(for host: String) -> String {
+        BusyBarClient.normalizedHost(host) == "10.0.4.20"
+            ? "usb"
+            : "wifi"
+    }
+
+    nonisolated static func isAuthenticationError(_ error: Error) -> Bool {
+        (error as? BusyBarError)?.statusCode == 403
     }
 
     /// Runs while the popover is visible; keeps the live preview fresh.

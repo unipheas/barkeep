@@ -2,7 +2,7 @@
 
 A macOS menu bar companion for the [Busy Bar](https://busy.app) — control your bar over USB or Wi-Fi, automate your busy status, and turn the little LED display into a proper developer peripheral.
 
-No cloud, no account, no telemetry: BarKeep talks directly to the bar's local HTTP API, either over USB (`http://10.0.4.20/api`, no authentication) or Wi-Fi (the bar's local IP address and API token).
+No cloud, no account, no telemetry: BarKeep talks directly to the bar's local HTTP API, either over USB (`http://10.0.4.20/api`, no authentication) or Wi-Fi (the bar's local IP address and local HTTP API password).
 
 ## Features
 
@@ -102,7 +102,7 @@ For a Busy Bar reached over Wi-Fi:
 ```bash
 codex mcp add barkeep \
   --env BARKEEP_HOST=YOUR_BAR_IP \
-  --env BARKEEP_TOKEN=YOUR_API_TOKEN \
+  --env BARKEEP_TOKEN=YOUR_HTTP_API_PASSWORD \
   -- /usr/bin/python3 "$(brew --prefix barkeep-cli)/libexec/barkeep_mcp.py"
 ```
 
@@ -172,15 +172,18 @@ Bar. Return to the Arcade tab and click **Capture Keyboard** to resume controls.
 
 ## Configuration
 
-Everything is configured in the app's Settings tab — device host, API token (needed for Wi-Fi), busy theme, notification filter, Slack token, ping target, weather unit and location (type a city, it's geocoded for you; leave empty for automatic IP-based location). No config files, no terminal required.
+Everything is configured in the app's Settings tab — device host, local HTTP API password (needed for Wi-Fi), busy theme, notification filter, Slack token, ping target, weather unit and location (type a city, it's geocoded for you; leave empty for automatic IP-based location). No config files, no terminal required.
 
-CLI env: `BARKEEP_HOST` (device address, default `10.0.4.20`), `BARKEEP_THEME` (busy theme, default `on_air`).
+CLI env: `BARKEEP_HOST` (device address, default `10.0.4.20`),
+`BARKEEP_TOKEN` (the local HTTP API password for Wi-Fi), and
+`BARKEEP_THEME` (busy theme, default `on_air`).
 
 ## Device API notes
 
-Verified against firmware 1.0.2 / API 24.3.0 ([official docs](https://api.busy.app/busybar/docs)):
+Verified against firmware 1.0.2 / API 24.3.0
+([official local HTTP API docs](https://docs.busy.app/bar/dev/http-api)):
 
-- Over USB the API is served at `http://10.0.4.20/api/*` with no authentication. Over Wi-Fi, enter the bar's local IP address and bearer token in Settings. The docs' `/busybar/*` prefix is for the cloud proxy; BarKeep communicates with the device locally.
+- Over USB the API is served at `http://10.0.4.20/api/*` with no authentication. Over Wi-Fi, enable HTTP API access in the bar's local web interface, configure its numeric password, then enter that same password in BarKeep Settings. BarKeep sends it using the firmware API's documented `X-API-Token` header. API tokens generated at `cloud.busy.app` are for the internet API and do not authenticate requests to a local IP address. The docs' `/busybar/*` prefix is for the cloud proxy; BarKeep communicates with the device locally.
 - Text elements accept printable ASCII only (bitmap fonts); BarKeep renders emoji/unicode to PNGs and uploads them as assets.
 - `/api/screen` returns base64 of raw **GRB** pixel data (LED byte order), 72×16×3.
 - The firmware rejects *all* draw requests while a busy session is active, regardless of priority.

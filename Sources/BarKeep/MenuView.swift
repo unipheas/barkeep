@@ -1,5 +1,55 @@
 import SwiftUI
 
+struct CompactSecureField: NSViewRepresentable {
+    @Binding var text: String
+    let placeholder: String
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text)
+    }
+
+    func makeNSView(context: Context) -> NSSecureTextField {
+        let field = NSSecureTextField()
+        field.placeholderString = placeholder
+        field.isBezeled = true
+        field.isBordered = true
+        field.drawsBackground = true
+        field.focusRingType = .default
+        field.delegate = context.coordinator
+        field.stringValue = text
+        return field
+    }
+
+    func updateNSView(_ field: NSSecureTextField, context: Context) {
+        context.coordinator.text = $text
+        field.placeholderString = placeholder
+        if field.stringValue != text {
+            field.stringValue = text
+        }
+    }
+
+    func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        nsView: NSSecureTextField,
+        context: Context
+    ) -> CGSize? {
+        CGSize(width: proposal.width ?? 140, height: 22)
+    }
+
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        var text: Binding<String>
+
+        init(text: Binding<String>) {
+            self.text = text
+        }
+
+        func controlTextDidChange(_ notification: Notification) {
+            guard let field = notification.object as? NSTextField else { return }
+            text.wrappedValue = field.stringValue
+        }
+    }
+}
+
 @MainActor
 struct MenuView: View {
     @Environment(AppState.self) private var state
@@ -61,7 +111,11 @@ struct MenuView: View {
             Circle()
                 .fill(state.deviceReachable ? .green : .orange)
                 .frame(width: 9, height: 9)
-            Text(state.deviceReachable ? "Busy Bar" : "Unreachable")
+            Text(
+                state.deviceReachable
+                    ? "Busy Bar"
+                    : state.authenticationRejected ? "Token rejected" : "Unreachable"
+            )
                 .font(.headline)
             Text(state.transportType.uppercased())
                 .font(.caption2)
@@ -75,14 +129,14 @@ struct MenuView: View {
                     .foregroundStyle(.secondary)
             }
             Button {
-                if let url = URL(string: "http://\(state.host)/") {
+                if let url = BusyBarClient.webInterfaceURL(for: state.host) {
                     NSWorkspace.shared.open(url)
                 }
             } label: {
                 Image(systemName: "globe")
             }
             .buttonStyle(.borderless)
-            .help("Open the bar's web interface (http://\(state.host))")
+            .help("Open the bar's web interface (http://\(BusyBarClient.normalizedHost(state.host)))")
             Button {
                 NSApp.terminate(nil)
             } label: {
@@ -657,10 +711,23 @@ struct SettingsTab: View {
                     .frame(width: 140)
                     .onSubmit { state.applyDeviceName() }
             }
-            LabeledContent("API token") {
-                SecureField("needed for Wi-Fi", text: $state.token)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 140)
+            LabeledContent("Wi-Fi password") {
+                CompactSecureField(
+                    text: $state.token,
+                    placeholder: "HTTP API password"
+                )
+                    .frame(width: 140, height: 22)
+            }
+            if state.authenticationRejected {
+                Text("Busy Bar reached, but it rejected the local HTTP API password (HTTP 403). Cloud API tokens do not work with a local IP address.")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if !state.deviceReachable && state.transportType == "wifi" {
+                Text("Wi-Fi device unreachable. Confirm the IP and use a network that allows devices to communicate with each other. Some phone hotspots isolate connected devices.")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Picker("On-call theme", selection: $state.theme) {
                 ForEach(state.availableThemes, id: \.self) { theme in
@@ -726,9 +793,11 @@ struct SettingsTab: View {
             Toggle("Sync Slack status when busy", isOn: $state.slackSyncEnabled)
             if state.slackSyncEnabled {
                 LabeledContent("User token") {
-                    SecureField("xoxp-…", text: $state.slackToken)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 160)
+                    CompactSecureField(
+                        text: $state.slackToken,
+                        placeholder: "xoxp-…"
+                    )
+                        .frame(width: 160, height: 22)
                 }
                 Text("Sets “🎧 On a call” + DND while busy; clears after. Token needs users.profile:write and dnd:write — see README.")
                     .font(.caption2)

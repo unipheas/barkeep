@@ -18,9 +18,20 @@ cp packaging/Info.plist "$APP/Contents/Info.plist"
 cp .build/release/BarKeep "$APP/Contents/MacOS/BarKeep"
 [ -f assets/AppIcon.icns ] && cp assets/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
-IDENTITY="${BARKEEP_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null \
-    | grep -E 'Developer ID Application|Apple Development' | grep -v REVOKED \
-    | head -1 | sed 's/^[^"]*"//; s/"$//')}"
+if [ -n "${BARKEEP_SIGN_IDENTITY:-}" ]; then
+    IDENTITY="$BARKEEP_SIGN_IDENTITY"
+else
+    # Keychain output is not ordered by certificate type. Select Developer ID
+    # explicitly so local rebuilds keep the same TCC identity as distributed builds.
+    IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
+        | grep 'Developer ID Application' | grep -v REVOKED \
+        | head -1 | sed 's/^[^"]*"//; s/"$//' || true)"
+    if [ -z "$IDENTITY" ]; then
+        IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
+            | grep 'Apple Development' | grep -v REVOKED \
+            | head -1 | sed 's/^[^"]*"//; s/"$//' || true)"
+    fi
+fi
 if [ -n "$IDENTITY" ]; then
     if [[ "$IDENTITY" == Developer\ ID\ Application:* ]]; then
         codesign --force --options runtime --timestamp -s "$IDENTITY" "$APP"

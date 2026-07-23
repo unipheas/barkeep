@@ -2,6 +2,7 @@ import Foundation
 
 struct BusyBarError: Error, LocalizedError {
     let message: String
+    var statusCode: Int? = nil
     var errorDescription: String? { message }
 }
 
@@ -51,7 +52,7 @@ final class BusyBarClient: @unchecked Sendable {
     private let session: URLSession
 
     init(host: String, token: String = "") {
-        self.host = host
+        self.host = Self.normalizedHost(host)
         self.token = token
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 6
@@ -60,7 +61,8 @@ final class BusyBarClient: @unchecked Sendable {
     }
 
     private func request(_ method: String, _ path: String, query: [String: String] = [:], body: Data? = nil, contentType: String = "application/json") throws -> URLRequest {
-        var components = URLComponents(string: "http://\(host)/api\(path)")
+        let normalizedHost = Self.normalizedHost(host)
+        var components = URLComponents(string: "http://\(normalizedHost)/api\(path)")
         if !query.isEmpty {
             components?.queryItems = query.map { URLQueryItem(name: $0.key, value: $0.value) }
         }
@@ -73,10 +75,39 @@ final class BusyBarClient: @unchecked Sendable {
             req.setValue(contentType, forHTTPHeaderField: "Content-Type")
             req.httpBody = body
         }
-        if !token.isEmpty {
-            req.setValue("bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
+        try Self.applyAuthentication(to: &req, token: token)
         return req
+    }
+
+    static func applyAuthentication(to request: inout URLRequest, token: String) throws {
+        if token.rangeOfCharacter(from: .newlines.union(.controlCharacters)) != nil {
+            throw BusyBarError(
+                message: "Wi-Fi password contains pasted line breaks. Clear it and enter only the Busy Bar's local HTTP API password."
+            )
+        }
+        if !token.isEmpty {
+            request.setValue(token, forHTTPHeaderField: "X-API-Token")
+        }
+    }
+
+    static func normalizedHost(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let components = URLComponents(string: trimmed),
+           components.scheme != nil,
+           let hostname = components.host {
+            if let port = components.port {
+                return "\(hostname):\(port)"
+            }
+            return hostname
+        }
+        return trimmed
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            .components(separatedBy: "/")
+            .first ?? trimmed
+    }
+
+    static func webInterfaceURL(for host: String) -> URL? {
+        URL(string: "http://\(normalizedHost(host))/")
     }
 
     @discardableResult
@@ -87,7 +118,10 @@ final class BusyBarClient: @unchecked Sendable {
         }
         guard (200..<300).contains(http.statusCode) else {
             let bodyText = String(data: data, encoding: .utf8) ?? ""
-            throw BusyBarError(message: "HTTP \(http.statusCode) \(req.url?.path ?? ""): \(bodyText.prefix(200))")
+            throw BusyBarError(
+                message: "HTTP \(http.statusCode) \(req.url?.path ?? ""): \(bodyText.prefix(200))",
+                statusCode: http.statusCode
+            )
         }
         return data
     }
