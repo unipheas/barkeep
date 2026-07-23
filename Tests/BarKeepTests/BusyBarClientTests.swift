@@ -15,6 +15,10 @@ final class BusyBarClientTests: XCTestCase {
             BusyBarClient.normalizedHost(" 10.0.4.20/ "),
             "10.0.4.20"
         )
+        XCTAssertEqual(
+            BusyBarClient.webInterfaceURL(for: "http://10.69.1.15/login")?.absoluteString,
+            "http://10.69.1.15/"
+        )
     }
 
     func testMultilineTokenIsRejectedBeforeSendingARequest() async {

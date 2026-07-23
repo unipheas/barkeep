@@ -25,11 +25,11 @@ else
     # explicitly so local rebuilds keep the same TCC identity as distributed builds.
     IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
         | grep 'Developer ID Application' | grep -v REVOKED \
-        | head -1 | sed 's/^[^"]*"//; s/"$//')"
+        | head -1 | sed 's/^[^"]*"//; s/"$//' || true)"
     if [ -z "$IDENTITY" ]; then
         IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
             | grep 'Apple Development' | grep -v REVOKED \
-            | head -1 | sed 's/^[^"]*"//; s/"$//')"
+            | head -1 | sed 's/^[^"]*"//; s/"$//' || true)"
     fi
 fi
 if [ -n "$IDENTITY" ]; then

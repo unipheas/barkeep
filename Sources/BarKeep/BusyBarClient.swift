@@ -106,6 +106,10 @@ final class BusyBarClient: @unchecked Sendable {
             .first ?? trimmed
     }
 
+    static func webInterfaceURL(for host: String) -> URL? {
+        URL(string: "http://\(normalizedHost(host))/")
+    }
+
     @discardableResult
     private func send(_ req: URLRequest) async throws -> Data {
         let (data, response) = try await session.data(for: req)

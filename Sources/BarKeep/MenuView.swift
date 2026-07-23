@@ -129,14 +129,14 @@ struct MenuView: View {
                     .foregroundStyle(.secondary)
             }
             Button {
-                if let url = URL(string: "http://\(state.host)/") {
+                if let url = BusyBarClient.webInterfaceURL(for: state.host) {
                     NSWorkspace.shared.open(url)
                 }
             } label: {
                 Image(systemName: "globe")
             }
             .buttonStyle(.borderless)
-            .help("Open the bar's web interface (http://\(state.host))")
+            .help("Open the bar's web interface (http://\(BusyBarClient.normalizedHost(state.host)))")
             Button {
                 NSApp.terminate(nil)
             } label: {
