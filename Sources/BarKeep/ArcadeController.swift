@@ -4,6 +4,34 @@ import os
 
 private let arcadeLog = Logger(subsystem: "dev.barkeep.mac", category: "arcade")
 
+struct ArcadeUploadLifecycle {
+    private(set) var session = 0
+    private(set) var uploadSession: Int?
+
+    mutating func beginSession() {
+        session += 1
+    }
+
+    mutating func beginUpload() -> Int {
+        uploadSession = session
+        return session
+    }
+
+    mutating func invalidateSession() {
+        session += 1
+    }
+
+    func shouldDraw(uploadSession: Int, isActive: Bool) -> Bool {
+        isActive && uploadSession == session
+    }
+
+    mutating func finishUpload(_ finishedSession: Int) -> Bool {
+        guard uploadSession == finishedSession else { return false }
+        uploadSession = nil
+        return true
+    }
+}
+
 private final class ArcadeInputPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
@@ -16,9 +44,12 @@ private final class ArcadeKeyboardCapture: NSObject, NSWindowDelegate {
     private var previousApplication: NSRunningApplication?
     private var onFocusLost: (() -> Void)?
     private var isStopping = false
+    private var captureTask: Task<Void, Never>?
+    private var captureEstablished = false
 
     func start(
         onEvent: @escaping (NSEvent) -> Void,
+        onCaptured: @escaping () -> Void,
         onFocusLost: @escaping () -> Void
     ) {
         stop(restoreFocus: false)
@@ -42,9 +73,6 @@ private final class ArcadeKeyboardCapture: NSObject, NSWindowDelegate {
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .transient, .ignoresCycle]
         panel.delegate = self
-        panel.orderFrontRegardless()
-        NSApp.activate(ignoringOtherApps: true)
-        panel.makeKey()
         self.panel = panel
 
         eventMonitor = NSEvent.addLocalMonitorForEvents(
@@ -53,10 +81,30 @@ private final class ArcadeKeyboardCapture: NSObject, NSWindowDelegate {
             onEvent(event)
             return nil
         }
+
+        // The menu-bar popover is still completing its button click when this
+        // method starts. Capturing immediately lets that popover steal key
+        // status back and looks like an external focus change.
+        captureTask = Task { [weak self, weak panel] in
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled, let self, let panel, self.panel === panel else {
+                return
+            }
+            panel.orderFrontRegardless()
+            NSApp.activate(ignoringOtherApps: true)
+            panel.makeKey()
+            self.captureEstablished = panel.isKeyWindow
+            if self.captureEstablished {
+                onCaptured()
+            }
+        }
     }
 
     func stop(restoreFocus: Bool = true) {
         isStopping = true
+        captureTask?.cancel()
+        captureTask = nil
+        captureEstablished = false
         if let eventMonitor {
             NSEvent.removeMonitor(eventMonitor)
             self.eventMonitor = nil
@@ -78,7 +126,7 @@ private final class ArcadeKeyboardCapture: NSObject, NSWindowDelegate {
     }
 
     func windowDidResignKey(_ notification: Notification) {
-        guard !isStopping else { return }
+        guard !isStopping, captureEstablished else { return }
         onFocusLost?()
     }
 }
@@ -91,6 +139,7 @@ final class ArcadeController {
     private(set) var previewImage: CGImage?
     private(set) var framesSent = 0
     private(set) var framesDropped = 0
+    private(set) var controlsCaptured = false
     var showPreview: Bool {
         didSet {
             UserDefaults.standard.set(showPreview, forKey: "arcadeShowPreview")
@@ -109,7 +158,7 @@ final class ArcadeController {
     private var uploadSlot = 0
     private var lastUpload = ContinuousClock.now
     private var nextUploadAllowed = ContinuousClock.now
-    private var generation = 0
+    private var uploadLifecycle = ArcadeUploadLifecycle()
     private var consecutiveFailures = 0
 
     init(client: BusyBarClient) {
@@ -125,7 +174,7 @@ final class ArcadeController {
         }
         selectedGame = game
         engine.select(game)
-        generation += 1
+        uploadLifecycle.beginSession()
         isActive = true
         framesSent = 0
         framesDropped = 0
@@ -135,13 +184,27 @@ final class ArcadeController {
         heldKeys.removeAll()
         pressedKeys.removeAll()
         updatePreview()
+        captureKeyboard()
+        startLoop()
+    }
+
+    func captureKeyboard() {
+        guard isActive else { return }
+        controlsCaptured = false
         keyboard.start(
             onEvent: { [weak self] event in self?.handle(event) },
+            onCaptured: { [weak self] in
+                self?.controlsCaptured = true
+                self?.errorMessage = nil
+            },
             onFocusLost: { [weak self] in
-                self?.stop(withError: "Arcade stopped because keyboard focus changed.")
+                guard let self else { return }
+                self.controlsCaptured = false
+                self.heldKeys.removeAll()
+                self.pressedKeys.removeAll()
+                self.errorMessage = "Keyboard focus released. Click Capture Keyboard to resume controls."
             }
         )
-        startLoop()
     }
 
     func select(_ game: ArcadeGame) {
@@ -163,14 +226,16 @@ final class ArcadeController {
 
     private func stop(withError error: String?) {
         guard isActive else { return }
-        generation += 1
+        uploadLifecycle.invalidateSession()
         isActive = false
         gameTask?.cancel()
         gameTask = nil
-        uploadTask?.cancel()
-        uploadTask = nil
+        // URLSession cancellation can leave a partially overwritten PNG in
+        // the device asset slot. Let the current upload finish; generation
+        // checks below prevent its stale frame from being drawn.
         heldKeys.removeAll()
         pressedKeys.removeAll()
+        controlsCaptured = false
         keyboard.stop()
         if let error {
             errorMessage = error
@@ -210,14 +275,22 @@ final class ArcadeController {
             return
         }
         lastUpload = now
-        let frameGeneration = generation
+        let frameGeneration = uploadLifecycle.beginUpload()
         let filename = "arcade\(uploadSlot).png"
         uploadSlot = (uploadSlot + 1) % 2
         uploadTask = Task { [weak self] in
             guard let self else { return }
             do {
                 try await self.client.uploadAsset(filename: filename, data: png)
-                guard self.isActive, self.generation == frameGeneration else { return }
+                guard self.uploadLifecycle.shouldDraw(
+                    uploadSession: frameGeneration,
+                    isActive: self.isActive
+                ) else {
+                    if self.uploadLifecycle.finishUpload(frameGeneration) {
+                        self.uploadTask = nil
+                    }
+                    return
+                }
                 try await self.client.drawImage(
                     named: filename, timeout: 1, priority: 99
                 )
@@ -226,8 +299,17 @@ final class ArcadeController {
                 self.nextUploadAllowed = .now
                 self.errorMessage = nil
             } catch is CancellationError {
-                // Stopping the arcade intentionally cancels an in-flight frame.
+                // Process shutdown can still cancel URLSession work.
             } catch {
+                guard self.uploadLifecycle.shouldDraw(
+                    uploadSession: frameGeneration,
+                    isActive: self.isActive
+                ) else {
+                    if self.uploadLifecycle.finishUpload(frameGeneration) {
+                        self.uploadTask = nil
+                    }
+                    return
+                }
                 arcadeLog.error("Arcade frame failed: \(error.localizedDescription, privacy: .public)")
                 self.errorMessage = error.localizedDescription
                 self.consecutiveFailures += 1
@@ -240,7 +322,7 @@ final class ArcadeController {
                     self.stop(withError: "Arcade stopped after repeated connection failures.")
                 }
             }
-            if self.generation == frameGeneration {
+            if self.uploadLifecycle.finishUpload(frameGeneration) {
                 self.uploadTask = nil
             }
         }
