@@ -167,9 +167,22 @@ struct ArcadeTab: View {
                     Button("Stop") { arcade.stop() }
                         .controlSize(.small)
                 }
-                Text("Keyboard captured · 1–4 switch games · R restarts · Esc stops")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                if arcade.controlsCaptured {
+                    Text("Keyboard captured · 1–4 switch games · R restarts · Esc stops")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                } else {
+                    HStack {
+                        Text("Keyboard controls are paused.")
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                        Spacer()
+                        Button("Capture Keyboard") {
+                            arcade.captureKeyboard()
+                        }
+                        .controlSize(.small)
+                    }
+                }
                 Text("\(arcade.framesSent) frames sent · \(arcade.framesDropped) skipped")
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.tertiary)

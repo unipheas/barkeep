@@ -200,6 +200,26 @@ final class BusyBarClient: @unchecked Sendable {
     static let displayWidth = 72
     static let displayHeight = 16
 
+    static func displayPayload(
+        elements: [[String: Any]],
+        priority: Int,
+        ledColor: String? = nil
+    ) -> [String: Any] {
+        var payload: [String: Any] = [
+            "app_id": appName,
+            "priority": priority,
+            "elements": elements,
+        ]
+        if let ledColor {
+            payload["led_notification_color"] = ledColor
+        }
+        return payload
+    }
+
+    static func assetQuery(filename: String) -> [String: String] {
+        ["app_id": appName, "file": filename]
+    }
+
     func drawText(_ text: String, font: TextFont, colorHex: String, timeout: Int, priority: Int, ledColor: String? = nil) async throws {
         let element: [String: Any] = [
             "id": "msg",
@@ -235,20 +255,17 @@ final class BusyBarClient: @unchecked Sendable {
     }
 
     private func draw(elements: [[String: Any]], priority: Int, ledColor: String? = nil) async throws {
-        var payload: [String: Any] = [
-            "application_name": Self.appName,
-            "priority": priority,
-            "elements": elements,
-        ]
-        if let ledColor {
-            payload["led_notification_color"] = ledColor
-        }
+        let payload = Self.displayPayload(
+            elements: elements,
+            priority: priority,
+            ledColor: ledColor
+        )
         let body = try JSONSerialization.data(withJSONObject: payload)
         try await send(try request("POST", "/display/draw", body: body))
     }
 
     func clearDisplay() async throws {
-        try await send(try request("DELETE", "/display/draw", query: ["application_name": Self.appName]))
+        try await send(try request("DELETE", "/display/draw", query: ["app_id": Self.appName]))
     }
 
     func drawCountdown(to date: Date, colorHex: String, timeout: Int, priority: Int) async throws {
@@ -434,7 +451,7 @@ final class BusyBarClient: @unchecked Sendable {
     func uploadAsset(filename: String, data: Data) async throws {
         let req = try request(
             "POST", "/assets/upload",
-            query: ["application_name": Self.appName, "file": filename],
+            query: Self.assetQuery(filename: filename),
             body: data,
             contentType: "application/octet-stream"
         )

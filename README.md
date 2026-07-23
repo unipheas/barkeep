@@ -157,6 +157,9 @@ the Arcade tab. Games cannot run while a native busy/timer session is active,
 because Busy Bar firmware rejects custom drawing during those sessions.
 Starting an on-call session stops the arcade automatically.
 
+If another Mac app takes keyboard focus, the game remains active on the Busy
+Bar. Return to the Arcade tab and click **Capture Keyboard** to resume controls.
+
 ## Configuration
 
 Everything is configured in the app's Settings tab — device host, API token (needed for Wi-Fi), busy theme, notification filter, Slack token, ping target, weather unit and location (type a city, it's geocoded for you; leave empty for automatic IP-based location). No config files, no terminal required.

@@ -16,9 +16,12 @@ private final class ArcadeKeyboardCapture: NSObject, NSWindowDelegate {
     private var previousApplication: NSRunningApplication?
     private var onFocusLost: (() -> Void)?
     private var isStopping = false
+    private var captureTask: Task<Void, Never>?
+    private var captureEstablished = false
 
     func start(
         onEvent: @escaping (NSEvent) -> Void,
+        onCaptured: @escaping () -> Void,
         onFocusLost: @escaping () -> Void
     ) {
         stop(restoreFocus: false)
@@ -42,9 +45,6 @@ private final class ArcadeKeyboardCapture: NSObject, NSWindowDelegate {
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .transient, .ignoresCycle]
         panel.delegate = self
-        panel.orderFrontRegardless()
-        NSApp.activate(ignoringOtherApps: true)
-        panel.makeKey()
         self.panel = panel
 
         eventMonitor = NSEvent.addLocalMonitorForEvents(
@@ -53,10 +53,30 @@ private final class ArcadeKeyboardCapture: NSObject, NSWindowDelegate {
             onEvent(event)
             return nil
         }
+
+        // The menu-bar popover is still completing its button click when this
+        // method starts. Capturing immediately lets that popover steal key
+        // status back and looks like an external focus change.
+        captureTask = Task { [weak self, weak panel] in
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled, let self, let panel, self.panel === panel else {
+                return
+            }
+            panel.orderFrontRegardless()
+            NSApp.activate(ignoringOtherApps: true)
+            panel.makeKey()
+            self.captureEstablished = panel.isKeyWindow
+            if self.captureEstablished {
+                onCaptured()
+            }
+        }
     }
 
     func stop(restoreFocus: Bool = true) {
         isStopping = true
+        captureTask?.cancel()
+        captureTask = nil
+        captureEstablished = false
         if let eventMonitor {
             NSEvent.removeMonitor(eventMonitor)
             self.eventMonitor = nil
@@ -78,7 +98,7 @@ private final class ArcadeKeyboardCapture: NSObject, NSWindowDelegate {
     }
 
     func windowDidResignKey(_ notification: Notification) {
-        guard !isStopping else { return }
+        guard !isStopping, captureEstablished else { return }
         onFocusLost?()
     }
 }
@@ -91,6 +111,7 @@ final class ArcadeController {
     private(set) var previewImage: CGImage?
     private(set) var framesSent = 0
     private(set) var framesDropped = 0
+    private(set) var controlsCaptured = false
     var showPreview: Bool {
         didSet {
             UserDefaults.standard.set(showPreview, forKey: "arcadeShowPreview")
@@ -135,13 +156,27 @@ final class ArcadeController {
         heldKeys.removeAll()
         pressedKeys.removeAll()
         updatePreview()
+        captureKeyboard()
+        startLoop()
+    }
+
+    func captureKeyboard() {
+        guard isActive else { return }
+        controlsCaptured = false
         keyboard.start(
             onEvent: { [weak self] event in self?.handle(event) },
+            onCaptured: { [weak self] in
+                self?.controlsCaptured = true
+                self?.errorMessage = nil
+            },
             onFocusLost: { [weak self] in
-                self?.stop(withError: "Arcade stopped because keyboard focus changed.")
+                guard let self else { return }
+                self.controlsCaptured = false
+                self.heldKeys.removeAll()
+                self.pressedKeys.removeAll()
+                self.errorMessage = "Keyboard focus released. Click Capture Keyboard to resume controls."
             }
         )
-        startLoop()
     }
 
     func select(_ game: ArcadeGame) {
@@ -171,6 +206,7 @@ final class ArcadeController {
         uploadTask = nil
         heldKeys.removeAll()
         pressedKeys.removeAll()
+        controlsCaptured = false
         keyboard.stop()
         if let error {
             errorMessage = error
@@ -219,7 +255,7 @@ final class ArcadeController {
                 try await self.client.uploadAsset(filename: filename, data: png)
                 guard self.isActive, self.generation == frameGeneration else { return }
                 try await self.client.drawImage(
-                    named: filename, timeout: 1, priority: 99
+                    named: filename, timeout: 6, priority: 95
                 )
                 self.framesSent += 1
                 self.consecutiveFailures = 0
