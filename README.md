@@ -49,6 +49,17 @@ the `barkeep` CLI, MCP server, and Claude Code hooks:
 brew install barkeep-cli
 ```
 
+When upgrading, quit the running menu-bar app first so macOS does not keep the
+old executable in memory:
+
+```bash
+osascript -e 'quit app "BarKeep"' 2>/dev/null || true
+brew upgrade --cask barkeep
+open -a BarKeep
+```
+
+The running app version is shown at the bottom-right of its menu.
+
 ### From source
 
 ```bash

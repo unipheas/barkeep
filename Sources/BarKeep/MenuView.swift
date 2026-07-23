@@ -30,6 +30,11 @@ struct MenuView: View {
                     .foregroundStyle(.red)
                     .lineLimit(3)
             }
+
+            Text("BarKeep v\(AppVersion.current)")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .padding(14)
         .frame(width: 340)
