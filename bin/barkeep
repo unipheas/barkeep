@@ -9,10 +9,13 @@
 #   barkeep sound
 #   barkeep status
 #
-# Env: BARKEEP_HOST (default 10.0.4.20), BARKEEP_THEME (default on_air)
+# Env: BARKEEP_HOST (default 10.0.4.20), BARKEEP_TOKEN (the local HTTP API
+#      password configured on the bar; needed for Wi-Fi),
+#      BARKEEP_THEME (default on_air)
 set -o pipefail
 
 HOST="${BARKEEP_HOST:-10.0.4.20}"
+TOKEN="${BARKEEP_TOKEN:-}"
 API="http://$HOST/api"
 THEME="${BARKEEP_THEME:-on_air}"
 CURL=/usr/bin/curl
@@ -45,10 +48,13 @@ color_hex() {
 api() {
     local method=$1 path=$2 body=$3
     local out
+    local auth=()
+    [[ "$TOKEN" == *$'\n'* || "$TOKEN" == *$'\r'* ]] && die "BARKEEP_TOKEN contains line breaks"
+    [[ -n "$TOKEN" ]] && auth=(-H "X-API-Token: $TOKEN")
     if [[ -n "$body" ]]; then
-        out=$($CURL -sS -m 8 -X "$method" "$API$path" -H 'Content-Type: application/json' -d "$body") || die "cannot reach bar at $HOST"
+        out=$($CURL -sS -m 8 -X "$method" "$API$path" "${auth[@]}" -H 'Content-Type: application/json' -d "$body") || die "cannot reach bar at $HOST"
     else
-        out=$($CURL -sS -m 8 -X "$method" "$API$path") || die "cannot reach bar at $HOST"
+        out=$($CURL -sS -m 8 -X "$method" "$API$path" "${auth[@]}") || die "cannot reach bar at $HOST"
     fi
     if [[ "$out" == *'"error"'* ]]; then
         die "device error: $out"
