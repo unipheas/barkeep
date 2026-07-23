@@ -39,13 +39,14 @@ BarKeep is open source and not notarized (no paid Apple Developer account), so m
 
 ```bash
 brew tap unipheas/barkeep
-brew install barkeep
+brew install --cask barkeep
 ```
 
-Then copy the installed app into place (the caveats show the exact path):
+Homebrew installs `BarKeep.app` directly into `/Applications`. To also install
+the `barkeep` CLI, MCP server, and Claude Code hooks:
 
 ```bash
-cp -R "$(brew --prefix)/opt/barkeep/BarKeep.app" /Applications/ && open /Applications/BarKeep.app
+brew install barkeep
 ```
 
 ### From source
