@@ -6,7 +6,12 @@
 
 A macOS menu bar companion for the [Busy Bar](https://busy.app) — control your bar over USB or Wi-Fi, automate your busy status, and turn the little LED display into a proper developer peripheral.
 
-No cloud, no account, no telemetry: BarKeep talks directly to the bar's local HTTP API, either over USB (`http://10.0.4.20/api`, no authentication) or Wi-Fi (the bar's local IP address and local HTTP API password).
+Core device control needs no BarKeep cloud, account, or telemetry: BarKeep
+talks directly to the bar's local HTTP API over USB
+(`http://10.0.4.20/api`, no authentication) or Wi-Fi (the bar's local IP
+address and local HTTP API password). Optional Slack sync, weather, and update
+checks contact their respective external services only when you enable or
+request those features.
 
 BarKeep is free and open-source software under the
 [MIT License](LICENSE). You are welcome to use it, fork it, modify it,
