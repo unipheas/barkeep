@@ -33,7 +33,7 @@ Requires macOS 14+ and a Busy Bar connected via USB or reachable on the same Wi-
 
 Grab `BarKeep-x.y.z.zip` from [Releases](https://github.com/unipheas/barkeep/releases), unzip, and move `BarKeep.app` to /Applications.
 
-BarKeep is open source and not notarized (no paid Apple Developer account), so macOS warns on first launch: right-click the app → **Open** → **Open**, or run `xattr -dr com.apple.quarantine /Applications/BarKeep.app`. If you'd rather not trust a downloaded binary, both options below build it from source on your machine.
+BarKeep is open source and not notarized (no paid Apple Developer account), so macOS warns on first launch: right-click the app → **Open** → **Open**, or run `xattr -dr com.apple.quarantine /Applications/BarKeep.app`. If you'd rather build it yourself, use the source instructions below.
 
 ### Homebrew
 
@@ -42,7 +42,7 @@ brew tap unipheas/barkeep
 brew install barkeep
 ```
 
-Then copy the built app into place (the caveats show the exact path):
+Then copy the installed app into place (the caveats show the exact path):
 
 ```bash
 cp -R "$(brew --prefix)/opt/barkeep/BarKeep.app" /Applications/ && open /Applications/BarKeep.app
@@ -75,7 +75,7 @@ Claude Code hooks: see [hooks/](hooks/) — wire them up in `~/.claude/settings.
 | Calendar auto-busy | Calendar (full access) | To know when you're in an event. |
 | Everything else | none | Mic detection reads CoreAudio device state, not audio. |
 
-Grant Full Disk Access in System Settings → Privacy & Security → Full Disk Access → add `dist/BarKeep.app`. **Note:** macOS ties the grant to the app's code signature — with ad-hoc signing you must re-grant after every rebuild; with a real identity it sticks.
+Grant Full Disk Access in System Settings → Privacy & Security → Full Disk Access → add the installed `BarKeep.app`. **Note:** macOS ties the grant to the app's code signature — with ad-hoc signing you may need to re-grant after rebuilding or upgrading; with a real identity it sticks.
 
 ## Slack setup
 
