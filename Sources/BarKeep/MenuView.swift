@@ -33,6 +33,7 @@ struct MenuView: View {
         }
         .padding(14)
         .frame(width: 340)
+        .fixedSize(horizontal: false, vertical: true)
         .task { await state.refreshDeviceStatus() }
         .task { await state.previewLoop() }
     }
