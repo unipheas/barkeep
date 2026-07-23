@@ -4,6 +4,7 @@ import SwiftUI
 struct MenuView: View {
     @Environment(AppState.self) private var state
     @State private var tab = 0
+    @State private var contentSize = CGSize.zero
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -39,6 +40,16 @@ struct MenuView: View {
         .padding(14)
         .frame(width: 340)
         .fixedSize(horizontal: false, vertical: true)
+        .background {
+            GeometryReader { geometry in
+                Color.clear.preference(
+                    key: MenuContentSizeKey.self,
+                    value: geometry.size
+                )
+            }
+        }
+        .onPreferenceChange(MenuContentSizeKey.self) { contentSize = $0 }
+        .background(MenuBarWindowSizer(contentSize: contentSize))
         .task { await state.refreshDeviceStatus() }
         .task { await state.previewLoop() }
     }
