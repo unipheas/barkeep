@@ -46,7 +46,7 @@ Homebrew installs `BarKeep.app` directly into `/Applications`. To also install
 the `barkeep` CLI, MCP server, and Claude Code hooks:
 
 ```bash
-brew install barkeep
+brew install barkeep-cli
 ```
 
 ### From source
