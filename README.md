@@ -1,8 +1,16 @@
 # BarKeep 👾
 
+[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![macOS 14+](https://img.shields.io/badge/macOS-14%2B-black.svg)](https://www.apple.com/macos/)
+[![Latest release](https://img.shields.io/github/v/release/unipheas/barkeep)](https://github.com/unipheas/barkeep/releases/latest)
+
 A macOS menu bar companion for the [Busy Bar](https://busy.app) — control your bar over USB or Wi-Fi, automate your busy status, and turn the little LED display into a proper developer peripheral.
 
 No cloud, no account, no telemetry: BarKeep talks directly to the bar's local HTTP API, either over USB (`http://10.0.4.20/api`, no authentication) or Wi-Fi (the bar's local IP address and local HTTP API password).
+
+BarKeep is free and open-source software under the
+[MIT License](LICENSE). You are welcome to use it, fork it, modify it,
+redistribute it, or build your own project from it. Contributions are welcome.
 
 ## Features
 
@@ -224,14 +232,31 @@ Verified against firmware 1.0.2 / API 24.3.0
 ## Development
 
 ```bash
+swift test             # run the test suite
 swift build            # debug build
-./make-app.sh          # release build + launch
+./make-app.sh          # signed release build + launch
 ```
 
 The icon is generated: `cd assets && swift gen_icon.swift 1024 icon.png` (see `gen_icon.swift` for the pixel grid).
 
+## Contributing
+
+Bug reports, feature ideas, documentation improvements, code contributions,
+and personal forks are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the
+development workflow and pull-request checklist.
+
+Please report potential vulnerabilities privately using
+[GitHub's security advisory form](https://github.com/unipheas/barkeep/security/advisories/new);
+see [SECURITY.md](SECURITY.md) for details.
+
 ## License
 
-MIT — see [LICENSE](LICENSE).
+BarKeep is released under the [MIT License](LICENSE). In practical terms, you
+may use, copy, modify, merge, publish, distribute, sublicense, and sell copies
+of the software. Keep the copyright and license notice with copies or
+substantial portions of the project.
+
+Contributions submitted to this repository are licensed under the same MIT
+terms.
 
 Not affiliated with Busy Inc. Busy Bar is a product of https://busy.app.

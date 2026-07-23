@@ -6,3 +6,11 @@ dist/
 assets/AppIcon.iconset/
 assets/preview.png
 PUBLISHING.md
+.gstack/
+.env
+.env.*
+!.env.example
+*.key
+*.p12
+*.pem
+*.mobileprovision
