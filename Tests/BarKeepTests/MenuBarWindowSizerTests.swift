@@ -42,4 +42,26 @@ final class MenuBarWindowSizerTests: XCTestCase {
         XCTAssertEqual(resized.minY, 200)
         XCTAssertEqual(resized.height, 600)
     }
+
+    func testCorrectionCanRestoreAnEarlierMenuBarAnchor() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 340, height: 360),
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: false
+        )
+        let systemMovedFrame = NSRect(x: 100, y: 200, width: 340, height: 360)
+        let originalTopY: CGFloat = 800
+        var anchoredFrame = systemMovedFrame
+        anchoredFrame.origin.y = originalTopY - anchoredFrame.height
+
+        let corrected = MenuBarWindowSizer.frame(
+            preservingTopOf: anchoredFrame,
+            forContentSize: CGSize(width: 340, height: 360),
+            in: window
+        )
+
+        XCTAssertEqual(corrected.maxY, originalTopY)
+        XCTAssertEqual(corrected.minY, 440)
+    }
 }
