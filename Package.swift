@@ -7,10 +7,7 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "BarKeep",
-            path: "Sources/BarKeep",
-            swiftSettings: [
-                .unsafeFlags(["-Xfrontend", "-default-isolation=MainActor"])
-            ]
+            path: "Sources/BarKeep"
         )
     ]
 )

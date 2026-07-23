@@ -1,6 +1,7 @@
 import SwiftUI
 
 /// A 72x16 pixel-art canvas matching the Busy Bar front display.
+@MainActor
 struct CanvasView: View {
     @Environment(AppState.self) private var state
 

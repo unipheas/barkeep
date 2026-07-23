@@ -1,5 +1,6 @@
 import SwiftUI
 
+@MainActor
 struct MenuView: View {
     @Environment(AppState.self) private var state
     @State private var tab = 0
@@ -76,6 +77,7 @@ struct MenuView: View {
 
 // MARK: - Device tab
 
+@MainActor
 struct DeviceTab: View {
     @Environment(AppState.self) private var state
 
@@ -202,6 +204,7 @@ struct DeviceTab: View {
 
 // MARK: - Message tab
 
+@MainActor
 struct MessageTab: View {
     @Environment(AppState.self) private var state
 
@@ -407,6 +410,7 @@ struct MessageTab: View {
 
 // MARK: - Timers tab
 
+@MainActor
 struct TimersTab: View {
     @Environment(AppState.self) private var state
 
@@ -485,6 +489,7 @@ struct TimersTab: View {
 
 // MARK: - Settings tab
 
+@MainActor
 struct SettingsTab: View {
     @Environment(AppState.self) private var state
     @State private var launchAtLogin = false

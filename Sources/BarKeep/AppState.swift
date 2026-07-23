@@ -214,10 +214,10 @@ final class AppState {
         micMonitor.start()
 
         notificationWatcher.onNotification = { [weak self] note in
-            Task { @MainActor in self?.handleNotification(note) }
+            Task { @MainActor [weak self] in self?.handleNotification(note) }
         }
         notificationWatcher.onStatusChange = { [weak self] status in
-            Task { @MainActor in self?.notificationStatus = status }
+            Task { @MainActor [weak self] in self?.notificationStatus = status }
         }
         if forwardNotifications { notificationWatcher.start() }
 

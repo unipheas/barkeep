@@ -1,6 +1,7 @@
 import SwiftUI
 
 @main
+@MainActor
 struct BarKeepApp: App {
     @State private var state = AppState()
 
