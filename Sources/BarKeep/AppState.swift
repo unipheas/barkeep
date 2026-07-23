@@ -114,6 +114,7 @@ final class AppState {
     // MARK: - Live state
 
     private(set) var micInUse = false
+    private(set) var activeMicrophoneNames: [String] = []
     private(set) var onCall = false
     private(set) var deviceReachable = false
     private(set) var batteryCharge: Int?
@@ -208,8 +209,8 @@ final class AppState {
         syncPingLoop()
         syncWeatherLoop()
 
-        micMonitor.onChange = { [weak self] inUse in
-            Task { @MainActor in self?.micStateChanged(inUse) }
+        micMonitor.onChange = { [weak self] activity in
+            Task { @MainActor in self?.micStateChanged(activity) }
         }
         micMonitor.start()
 
@@ -498,8 +499,9 @@ final class AppState {
 
     // MARK: - On-call logic
 
-    private func micStateChanged(_ inUse: Bool) {
-        micInUse = inUse
+    private func micStateChanged(_ activity: MicMonitor.Activity) {
+        micInUse = activity.isInUse
+        activeMicrophoneNames = activity.deviceNames
         guard autoOnCall else { return }
         syncAutoBusy()
     }

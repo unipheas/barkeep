@@ -10,6 +10,8 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
+      - name: Test
+        run: swift test
       - name: Build
         run: swift build -c release
       - name: Package app bundle

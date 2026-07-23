@@ -8,6 +8,11 @@ let package = Package(
         .executableTarget(
             name: "BarKeep",
             path: "Sources/BarKeep"
+        ),
+        .testTarget(
+            name: "BarKeepTests",
+            dependencies: ["BarKeep"],
+            path: "Tests/BarKeepTests"
         )
     ]
 )

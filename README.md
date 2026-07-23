@@ -23,7 +23,7 @@ No cloud, no account, no telemetry: BarKeep talks directly to the bar's local HT
 
 - 🖥 **`barkeep` CLI** — `barkeep send "build done" -c green`, `barkeep busy on -T coding`, `barkeep timer 45`, `barkeep pomodoro`… zero dependencies, scriptable from anything.
 - 🤖 **Claude Code hooks** — the bar becomes your agent status light: green scroll + chime when a long task finishes, red flash when Claude waits on input.
-- 🔌 **MCP server** — exposes the bar as tools (`bar_send_message`, `bar_set_busy`, `bar_start_timer`, …) so AI assistants can drive it directly.
+- 🔌 **MCP server** — exposes the bar as tools (`bar_send_message`, `bar_set_busy`, `bar_start_timer`, …) so Claude, Codex, and ChatGPT desktop can drive it directly.
 
 ## Install
 
@@ -67,6 +67,33 @@ claude mcp add --scope user barkeep -- /usr/bin/python3 "$PWD/mcp/barkeep_mcp.py
 ```
 
 Claude Code hooks: see [hooks/](hooks/) — wire them up in `~/.claude/settings.json` (`UserPromptSubmit` → `claude-prompt-submit.sh`, `Stop` → `claude-stop.sh`, `Notification` → `claude-notification.sh`).
+
+### Codex and ChatGPT desktop
+
+The ChatGPT desktop app, Codex CLI, and Codex IDE extension share local MCP
+configuration. Install the developer tools, then register BarKeep:
+
+```bash
+brew install barkeep-cli
+codex mcp add barkeep -- /usr/bin/python3 "$(brew --prefix barkeep-cli)/libexec/barkeep_mcp.py"
+```
+
+For a Busy Bar reached over Wi-Fi:
+
+```bash
+codex mcp add barkeep \
+  --env BARKEEP_HOST=YOUR_BAR_IP \
+  --env BARKEEP_TOKEN=YOUR_API_TOKEN \
+  -- /usr/bin/python3 "$(brew --prefix barkeep-cli)/libexec/barkeep_mcp.py"
+```
+
+Restart ChatGPT desktop, Codex, or the IDE extension after adding the server.
+Use `/mcp` to confirm that `barkeep` is connected.
+
+For the same automatic task-finished and needs-input signals as Claude Code,
+merge [`hooks/codex-hooks.json`](hooks/codex-hooks.json) into
+`~/.codex/hooks.json`, restart Codex/ChatGPT desktop, then open `/hooks` and
+trust the three BarKeep commands. Codex and ChatGPT desktop share these hooks.
 
 ## Permissions
 

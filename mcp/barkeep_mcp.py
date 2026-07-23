@@ -12,6 +12,7 @@ import urllib.request
 import urllib.parse
 
 HOST = os.environ.get("BARKEEP_HOST", "10.0.4.20")
+TOKEN = os.environ.get("BARKEEP_TOKEN", "")
 API = f"http://{HOST}/api"
 
 COLORS = {
@@ -83,6 +84,8 @@ def api(method, path, body=None, query=None):
     req = urllib.request.Request(url, data=data, method=method)
     if data:
         req.add_header("Content-Type", "application/json")
+    if TOKEN:
+        req.add_header("Authorization", f"bearer {TOKEN}")
     with urllib.request.urlopen(req, timeout=8) as resp:
         return json.loads(resp.read().decode() or "{}")
 
@@ -196,7 +199,10 @@ def main():
             reply(msg_id, {
                 "protocolVersion": msg.get("params", {}).get("protocolVersion", "2024-11-05"),
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "barkeep", "version": "1.0.0"},
+                "serverInfo": {"name": "barkeep", "version": "1.1.0"},
+                "instructions": "Use these tools when the user asks to control or inspect their Busy Bar. "
+                                "Do not change busy state, start timers, clear the display, or send "
+                                "messages unless the user requests that action.",
             })
         elif method == "notifications/initialized":
             continue

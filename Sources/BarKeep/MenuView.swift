@@ -100,9 +100,11 @@ struct DeviceTab: View {
                 Circle()
                     .fill(state.micInUse ? .red : .secondary.opacity(0.4))
                     .frame(width: 8, height: 8)
-                Text(state.micInUse ? "Microphone in use" : "Microphone idle")
+                Text(microphoneStatus)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .help(microphoneStatus)
                 if state.queuedCount > 0 {
                     Spacer()
                     Text("\(state.queuedCount) notification\(state.queuedCount == 1 ? "" : "s") queued")
@@ -175,6 +177,12 @@ struct DeviceTab: View {
                 }
             }
         }
+    }
+
+    private var microphoneStatus: String {
+        guard state.micInUse else { return "Microphone idle" }
+        guard !state.activeMicrophoneNames.isEmpty else { return "Microphone in use" }
+        return "In use: \(state.activeMicrophoneNames.joined(separator: ", "))"
     }
 
     private var preview: some View {

@@ -1,0 +1,35 @@
+{
+  "description": "BarKeep notifications for Codex and ChatGPT desktop.",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "BARKEEP_AGENT=Codex \"$(brew --prefix barkeep-cli)/share/barkeep-cli/hooks/agent-prompt-submit.sh\""
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "BARKEEP_AGENT=Codex \"$(brew --prefix barkeep-cli)/share/barkeep-cli/hooks/agent-notification.sh\""
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "BARKEEP_AGENT=Codex \"$(brew --prefix barkeep-cli)/share/barkeep-cli/hooks/agent-stop.sh\""
+          }
+        ]
+      }
+    ]
+  }
+}
