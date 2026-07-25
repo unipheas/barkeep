@@ -17,6 +17,19 @@ BarKeep is free and open-source software under the
 [MIT License](LICENSE). You are welcome to use it, fork it, modify it,
 redistribute it, or build your own project from it. Contributions are welcome.
 
+## Development transparency
+
+BarKeep was built with substantial assistance from generative AI tools,
+primarily OpenAI ChatGPT/Codex and Anthropic Claude. AI assisted with product
+exploration, implementation, debugging, tests, documentation, and release
+automation.
+
+Brian Phillips is the human maintainer and reviews, tests, signs, and takes
+responsibility for every official release. This disclosure describes how the
+software was developed: BarKeep does not require or contact an AI service
+during normal operation. Its optional hooks and MCP server only connect to AI
+tools when you explicitly configure them.
+
 ## Features
 
 **Menu bar app** (tabbed popover: Device / Message / Timers / Arcade / Settings)
@@ -243,6 +256,11 @@ swift build            # debug build
 ```
 
 The icon is generated: `cd assets && swift gen_icon.swift 1024 icon.png` (see `gen_icon.swift` for the pixel grid).
+
+Release packaging verifies the signed app before archiving and verifies a
+freshly extracted copy with
+[`scripts/verify-release-archive.sh`](scripts/verify-release-archive.sh), so a
+damaged release archive fails before publication.
 
 ## Contributing
 
