@@ -26,8 +26,17 @@ fi
 codesign --verify --deep --strict --verbose=2 "$APP"
 
 ZIP="dist/BarKeep-${VERSION}.zip"
-rm -f "$ZIP"
-ditto -c -k --keepParent "$APP" "$ZIP"
+
+package_and_verify() {
+    rm -f "$ZIP"
+    # Do not ship local resource-fork metadata as unnecessary AppleDouble (._*)
+    # entries. The signed files and notarization ticket remain in the archive.
+    ditto -c -k --norsrc --keepParent "$APP" "$ZIP"
+    codesign --verify --deep --strict --verbose=2 "$APP"
+    ./scripts/verify-release-archive.sh "$ZIP"
+}
+
+package_and_verify
 
 if [ -n "${BARKEEP_NOTARY_PROFILE:-}" ]; then
     xcrun notarytool submit "$ZIP" \
@@ -35,8 +44,9 @@ if [ -n "${BARKEEP_NOTARY_PROFILE:-}" ]; then
         --wait
     xcrun stapler staple "$APP"
     xcrun stapler validate "$APP"
-    rm -f "$ZIP"
-    ditto -c -k --keepParent "$APP" "$ZIP"
+    codesign --verify --deep --strict --verbose=2 "$APP"
+    spctl --assess --type execute --verbose=2 "$APP"
+    package_and_verify
 fi
 
 echo "Packaged $ZIP"

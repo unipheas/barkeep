@@ -65,6 +65,18 @@ Before opening a pull request:
 GitHub Actions runs the test suite and release build for every pull request.
 Maintainers may ask for changes before merging.
 
+## AI-assisted contributions
+
+AI-assisted contributions are welcome. If you use a generative AI tool,
+identify the tool and summarize what it assisted with in the pull-request
+description. You remain responsible for understanding and reviewing every
+submitted change, running the required tests, and confirming that the
+contribution does not include private data or code with incompatible licensing.
+
+Treat generated output as untrusted until you have reviewed and tested it. Do
+not paste credentials, private messages, proprietary source code, or other
+sensitive material into an AI service.
+
 ## Protect credentials and private data
 
 Never commit:
