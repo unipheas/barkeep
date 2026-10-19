@@ -18,47 +18,67 @@ struct MessagePreset: Codable, Identifiable, Hashable {
 final class AppState {
     // MARK: - Settings (persisted)
 
-    var host: String {
-        didSet {
-            UserDefaults.standard.set(host, forKey: "host")
-            client.host = host
-            if !deviceReachable {
-                transportType = Self.configuredTransport(for: host)
-            }
+    private var connection: DeviceConnection
+    private let defaults: UserDefaults
+    private var connectionRevision = 0
+    private var connectionTask: Task<Void, Never>?
+    private(set) var isConnecting = false
+
+    var connectionMode: DeviceConnectionMode {
+        get { connection.mode }
+        set {
+            guard connection.mode != newValue else { return }
+            connection.mode = newValue
+            connectionChanged()
         }
     }
+    var wifiHost: String {
+        get { connection.wifiHost }
+        set {
+            connection.wifiHost = newValue
+            connection.save(to: defaults)
+            if connectionMode == .wifi { connectionChanged(resetBusyOwnership: true) }
+        }
+    }
+    var host: String { connection.host }
+    var connectionHelp: String? { connection.configurationHelp }
     var token: String {
-        didSet { UserDefaults.standard.set(token, forKey: "token"); client.token = token }
+        get { connection.password }
+        set {
+            connection.password = newValue
+            connection.save(to: defaults)
+            if connectionMode == .wifi { connectionChanged() }
+        }
     }
     var autoOnCall: Bool {
         didSet {
-            UserDefaults.standard.set(autoOnCall, forKey: "autoOnCall")
+            defaults.set(autoOnCall, forKey: "autoOnCall")
             syncAutoBusy()
         }
     }
     var theme: String {
-        didSet { UserDefaults.standard.set(theme, forKey: "theme") }
+        didSet { defaults.set(theme, forKey: "theme") }
     }
     var triggerSmartHome: Bool {
-        didSet { UserDefaults.standard.set(triggerSmartHome, forKey: "triggerSmartHome") }
+        didSet { defaults.set(triggerSmartHome, forKey: "triggerSmartHome") }
     }
     /// Seconds the mic must stay idle before "on call" is cleared.
     var offDebounceSeconds: Double {
-        didSet { UserDefaults.standard.set(offDebounceSeconds, forKey: "offDebounceSeconds") }
+        didSet { defaults.set(offDebounceSeconds, forKey: "offDebounceSeconds") }
     }
     var forwardNotifications: Bool {
         didSet {
-            UserDefaults.standard.set(forwardNotifications, forKey: "forwardNotifications")
+            defaults.set(forwardNotifications, forKey: "forwardNotifications")
             forwardNotifications ? notificationWatcher.start() : notificationWatcher.stop()
         }
     }
     /// Comma-separated bundle-ID substrings to forward; empty forwards everything.
     var notificationAppFilter: String {
-        didSet { UserDefaults.standard.set(notificationAppFilter, forKey: "notificationAppFilter") }
+        didSet { defaults.set(notificationAppFilter, forKey: "notificationAppFilter") }
     }
     var calendarAutoBusy: Bool {
         didSet {
-            UserDefaults.standard.set(calendarAutoBusy, forKey: "calendarAutoBusy")
+            defaults.set(calendarAutoBusy, forKey: "calendarAutoBusy")
             if calendarAutoBusy {
                 Task {
                     _ = await calendarMonitor.requestAccess()
@@ -71,48 +91,48 @@ final class AppState {
     }
     /// Play a chime on the bar's speaker when a notification is forwarded.
     var notificationChime: Bool {
-        didSet { UserDefaults.standard.set(notificationChime, forKey: "notificationChime") }
+        didSet { defaults.set(notificationChime, forKey: "notificationChime") }
     }
     /// Hold notifications that arrive during a call and replay them after.
     var queueDuringCalls: Bool {
-        didSet { UserDefaults.standard.set(queueDuringCalls, forKey: "queueDuringCalls") }
+        didSet { defaults.set(queueDuringCalls, forKey: "queueDuringCalls") }
     }
     var presets: [MessagePreset] {
         didSet {
             if let data = try? JSONEncoder().encode(presets) {
-                UserDefaults.standard.set(data, forKey: "presets")
+                defaults.set(data, forKey: "presets")
             }
         }
     }
     var slackSyncEnabled: Bool {
-        didSet { UserDefaults.standard.set(slackSyncEnabled, forKey: "slackSyncEnabled") }
+        didSet { defaults.set(slackSyncEnabled, forKey: "slackSyncEnabled") }
     }
     var slackToken: String {
         didSet {
-            UserDefaults.standard.set(slackToken, forKey: "slackToken")
+            defaults.set(slackToken, forKey: "slackToken")
             slackSync.token = slackToken
         }
     }
     /// Show live network latency in the bar's bottom-right corner.
     var showPing: Bool {
         didSet {
-            UserDefaults.standard.set(showPing, forKey: "showPing")
+            defaults.set(showPing, forKey: "showPing")
             syncPingLoop()
         }
     }
     /// Show local weather (icon + temperature) on the bar's left side.
     var showWeather: Bool {
         didSet {
-            UserDefaults.standard.set(showWeather, forKey: "showWeather")
+            defaults.set(showWeather, forKey: "showWeather")
             syncWeatherLoop()
         }
     }
     var pingHost: String {
-        didSet { UserDefaults.standard.set(pingHost, forKey: "pingHost") }
+        didSet { defaults.set(pingHost, forKey: "pingHost") }
     }
     var weatherCelsius: Bool {
         didSet {
-            UserDefaults.standard.set(weatherCelsius, forKey: "weatherCelsius")
+            defaults.set(weatherCelsius, forKey: "weatherCelsius")
             syncWeatherLoop()
         }
     }
@@ -181,12 +201,10 @@ final class AppState {
         ("mail", "#0078D4FF"),
     ]
 
-    init() {
-        let defaults = UserDefaults.standard
-        let host = defaults.string(forKey: "host") ?? "10.0.4.20"
-        let token = defaults.string(forKey: "token") ?? ""
-        self.host = host
-        self.token = token
+    init(defaults: UserDefaults = .standard, startServices: Bool = true, session: URLSession? = nil) {
+        let connection = DeviceConnection(defaults: defaults)
+        self.connection = connection
+        self.defaults = defaults
         self.autoOnCall = defaults.object(forKey: "autoOnCall") as? Bool ?? true
         self.theme = defaults.string(forKey: "theme") ?? "on_air"
         self.triggerSmartHome = defaults.object(forKey: "triggerSmartHome") as? Bool ?? true
@@ -213,9 +231,10 @@ final class AppState {
         self.showWeather = defaults.object(forKey: "showWeather") as? Bool ?? false
         self.pingHost = defaults.string(forKey: "pingHost") ?? "1.1.1.1"
         self.weatherCelsius = defaults.bool(forKey: "weatherCelsius")
-        self.client = BusyBarClient(host: host, token: token)
-        self.transportType = Self.configuredTransport(for: host)
+        self.client = BusyBarClient(host: connection.host, token: connection.token, session: session)
+        self.transportType = connection.mode.rawValue
         self.arcade = ArcadeController(client: self.client)
+        guard startServices else { return }
         localNetworkPermissionTrigger.onAccessAvailable = { [weak self] in
             Task { @MainActor [weak self] in
                 await self?.refreshDeviceStatus()
@@ -247,34 +266,74 @@ final class AppState {
 
     // MARK: - Device status
 
+    private func connectionChanged(resetBusyOwnership: Bool = false) {
+        if arcade.isActive { arcade.stop() }
+        connection.save(to: defaults)
+        connectionRevision += 1
+        connectionTask?.cancel()
+        // USB and Wi-Fi are two routes to the same bar. Retain ownership of
+        // our busy session so a later mic-off can still clear it. Editing the
+        // Wi-Fi address may select a different device, so discard ownership.
+        if resetBusyOwnership {
+            offDebounceTask?.cancel()
+            weSetBusy = false
+        }
+        client.host = connection.host
+        client.token = connection.token
+        deviceReachable = false
+        authenticationRejected = false
+        isConnecting = false
+        batteryCharge = nil
+        firmwareVersion = nil
+        screenPreview = nil
+        onCall = false
+        transportType = connectionMode.rawValue
+        wifiStateText = "unknown"
+        deviceNameText = ""
+        updateCheckText = nil
+        lastError = nil
+        guard !connection.needsWiFiHost else { return }
+        connectionTask = Task { await refreshDeviceStatus() }
+    }
+
     func refreshDeviceStatus() async {
+        guard !connection.needsWiFiHost else { return }
+        let revision = connectionRevision
+        // Snapshot the endpoint so an in-flight refresh cannot mix USB and Wi-Fi
+        // responses or overwrite the newly selected connection's state.
+        let endpoint = client.snapshot()
+        isConnecting = true
+        defer { if revision == connectionRevision { isConnecting = false } }
         do {
-            let status = try await client.status()
+            let status = try await endpoint.status()
+            guard revision == connectionRevision, !Task.isCancelled else { return }
             deviceReachable = true
             authenticationRejected = false
             batteryCharge = status.power.battery_charge
             firmwareVersion = status.firmware.version
-            let busyType = try await client.currentBusyType()
+            let busyType = try await endpoint.currentBusyType()
+            guard revision == connectionRevision, !Task.isCancelled else { return }
             onCall = busyType != "NOT_STARTED"
-            if onCall, arcade.isActive {
-                arcade.stop()
-            }
-            if let themes = try? await client.listThemes(), !themes.isEmpty {
-                availableThemes = themes
-            }
-            if let value = try? await client.brightness() { brightnessValue = value }
-            if let value = try? await client.volume() { volumeValue = value }
-            if let value = try? await client.transport() { transportType = value }
-            if let value = try? await client.wifiState() { wifiStateText = value }
-            if let value = try? await client.deviceName() { deviceNameText = value }
+            if onCall, arcade.isActive { arcade.stop() }
+            let themes = try? await endpoint.listThemes()
+            let brightness = try? await endpoint.brightness()
+            let volume = try? await endpoint.volume()
+            let wifiState = try? await endpoint.wifiState()
+            let name = try? await endpoint.deviceName()
+            guard revision == connectionRevision, !Task.isCancelled else { return }
+            if let themes, !themes.isEmpty { availableThemes = themes }
+            if let brightness { brightnessValue = brightness }
+            if let volume { volumeValue = volume }
+            if let wifiState { wifiStateText = wifiState }
+            if let name { deviceNameText = name }
         } catch {
+            guard revision == connectionRevision, !Task.isCancelled else { return }
             deviceReachable = false
             authenticationRejected = Self.isAuthenticationError(error)
             batteryCharge = nil
-            transportType = Self.configuredTransport(for: host)
-            if arcade.isActive {
-                arcade.stop()
-            }
+            screenPreview = nil
+            firmwareVersion = nil
+            if arcade.isActive { arcade.stop() }
         }
     }
 
@@ -291,11 +350,22 @@ final class AppState {
     /// Runs while the popover is visible; keeps the live preview fresh.
     func previewLoop() async {
         while !Task.isCancelled {
-            if let frame = try? await client.screenFrame() {
-                screenPreview = Self.cgImage(from: frame)
-                deviceReachable = true
-            } else {
-                screenPreview = nil
+            let revision = connectionRevision
+            let endpoint = client.snapshot()
+            if !connection.needsWiFiHost {
+                do {
+                    let frame = try await endpoint.screenFrame()
+                    guard revision == connectionRevision, !Task.isCancelled else { continue }
+                    screenPreview = Self.cgImage(from: frame)
+                    deviceReachable = true
+                    authenticationRejected = false
+                } catch {
+                    guard revision == connectionRevision, !Task.isCancelled else { continue }
+                    screenPreview = nil
+                    deviceReachable = false
+                    authenticationRejected = Self.isAuthenticationError(error)
+                    batteryCharge = nil
+                }
             }
             try? await Task.sleep(for: .seconds(1))
         }
@@ -347,13 +417,16 @@ final class AppState {
     }
 
     func checkForUpdate() {
+        let revision = connectionRevision
+        let endpoint = client.snapshot()
         updateCheckText = "Checking…"
         Task {
             do {
-                try await client.startUpdateCheck()
+                try await endpoint.startUpdateCheck()
                 for _ in 0..<15 {
                     try await Task.sleep(for: .seconds(2))
-                    let status = try await client.updateStatus()
+                    let status = try await endpoint.updateStatus()
+                    guard revision == connectionRevision else { return }
                     switch status.check.status {
                     case "ok", "success":
                         updateCheckText = status.check.available_version.isEmpty
@@ -367,8 +440,10 @@ final class AppState {
                         continue
                     }
                 }
+                guard revision == connectionRevision else { return }
                 updateCheckText = "Check timed out"
             } catch {
+                guard revision == connectionRevision else { return }
                 updateCheckText = "Check failed: \(error.localizedDescription)"
             }
         }
@@ -445,14 +520,14 @@ final class AppState {
 
     /// Human-readable current weather location for the settings UI.
     var weatherLocationLabel: String {
-        UserDefaults.standard.string(forKey: "weatherCity") ?? "Automatic (IP-based)"
+        defaults.string(forKey: "weatherCity") ?? "Automatic (IP-based)"
     }
 
     /// Empty query reverts to automatic IP-based location; otherwise the
     /// city name is geocoded and pinned.
     func applyWeatherLocation(_ query: String) {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
-        let defaults = UserDefaults.standard
+        let defaults = defaults
         if trimmed.isEmpty {
             defaults.removeObject(forKey: "weatherLat")
             defaults.removeObject(forKey: "weatherLon")
@@ -565,6 +640,8 @@ final class AppState {
     }
 
     func setOnCall(_ on: Bool, automatic: Bool = false) {
+        let revision = connectionRevision
+        let endpoint = client.snapshot()
         Task {
             do {
                 if on, arcade.isActive {
@@ -572,13 +649,15 @@ final class AppState {
                 }
                 if on && automatic {
                     // Don't stomp a busy session the user started elsewhere.
-                    let current = try await client.currentBusyType()
+                    let current = try await endpoint.currentBusyType()
+                    guard revision == connectionRevision else { return }
                     if current != "NOT_STARTED" && !weSetBusy {
                         onCall = true
                         return
                     }
                 }
-                try await client.setBusy(on, theme: theme, triggerSmartHome: triggerSmartHome)
+                try await endpoint.setBusy(on, theme: theme, triggerSmartHome: triggerSmartHome)
+                guard revision == connectionRevision else { return }
                 onCall = on
                 weSetBusy = on
                 deviceReachable = true
@@ -590,6 +669,7 @@ final class AppState {
                     }
                 }
             } catch {
+                guard revision == connectionRevision else { return }
                 lastError = error.localizedDescription
                 await refreshDeviceStatus()
             }

@@ -59,6 +59,17 @@ struct MenuView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
+            Picker("Connection", selection: Bindable(state).connectionMode) {
+                ForEach(DeviceConnectionMode.allCases) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("connectionMode")
+            if let help = state.connectionHelp {
+                Text(help)
+                    .font(.caption).foregroundStyle(.orange)
+            }
             Picker("", selection: $tab) {
                 Text("Device").tag(0)
                 Text("Message").tag(1)
@@ -90,7 +101,7 @@ struct MenuView: View {
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .padding(14)
-        .frame(width: 340)
+        .frame(width: 400)
         .fixedSize(horizontal: false, vertical: true)
         .background {
             GeometryReader { geometry in
@@ -114,7 +125,8 @@ struct MenuView: View {
             Text(
                 state.deviceReachable
                     ? "Busy Bar"
-                    : state.authenticationRejected ? "Token rejected" : "Unreachable"
+                    : state.isConnecting ? "Connecting…"
+                    : state.authenticationRejected ? "Password rejected" : "Unreachable"
             )
                 .font(.headline)
             Text(state.transportType.uppercased())
@@ -700,8 +712,8 @@ struct SettingsTab: View {
     var body: some View {
         @Bindable var state = state
         VStack(alignment: .leading, spacing: 8) {
-            LabeledContent("Device host") {
-                TextField("10.0.4.20", text: $state.host)
+            LabeledContent("Wi-Fi address") {
+                TextField("busybar.local or IP", text: $state.wifiHost)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 140)
             }
@@ -723,12 +735,17 @@ struct SettingsTab: View {
                     .font(.caption2)
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
-            } else if !state.deviceReachable && state.transportType == "wifi" {
+            } else if !state.deviceReachable && !state.isConnecting && state.connectionMode == .wifi && !state.host.isEmpty {
                 Text("Wi-Fi device unreachable. Confirm the IP and use a network that allows devices to communicate with each other. Some phone hotspots isolate connected devices.")
                     .font(.caption2)
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            Text("USB uses 10.0.4.20 without a password. Wi-Fi uses the saved address and local HTTP API password. Changing the connection does not change the bar’s network settings.")
+                .font(.caption2).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("Reconnect") { Task { await state.refreshDeviceStatus() } }
+                .disabled(state.isConnecting || state.host.isEmpty)
             Picker("On-call theme", selection: $state.theme) {
                 ForEach(state.availableThemes, id: \.self) { theme in
                     Text(themeTitle(theme)).tag(theme)

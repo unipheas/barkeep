@@ -51,13 +51,19 @@ final class BusyBarClient: @unchecked Sendable {
 
     private let session: URLSession
 
-    init(host: String, token: String = "") {
+    init(host: String, token: String = "", session: URLSession? = nil) {
         self.host = Self.normalizedHost(host)
         self.token = token
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 6
         config.timeoutIntervalForResource = 20
-        self.session = URLSession(configuration: config)
+        self.session = session ?? URLSession(configuration: config)
+    }
+
+    /// Pin a multi-request operation to its starting endpoint while sharing the
+    /// session's connection pool. Later UI route changes affect new operations.
+    func snapshot() -> BusyBarClient {
+        BusyBarClient(host: host, token: token, session: session)
     }
 
     private func request(_ method: String, _ path: String, query: [String: String] = [:], body: Data? = nil, contentType: String = "application/json") throws -> URLRequest {
