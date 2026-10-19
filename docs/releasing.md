@@ -54,14 +54,13 @@ password prompt and explicit keychain location.
 ## Build and verify each release
 
 Start from the merged, passing main commit, preserve local edits, and verify
-that the intended version/tag/release does not already exist. Version 1.0.14
-is already set in `packaging/Info.plist` on main.
+that the intended version/tag/release does not already exist. Use the version in `packaging/Info.plist` and verify it matches the intended release.
 
 ```sh
 swift test
 swift build -c release
 ./scripts/release-on-nova.sh --check
-./scripts/release-on-nova.sh 1.0.14
+./scripts/release-on-nova.sh
 ```
 
 The production wrapper requires Developer ID and a working existing notary

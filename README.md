@@ -98,9 +98,10 @@ For Wi-Fi:
 
 1. Open the Busy Bar's web interface and go to **Network → HTTP API**.
 2. Enable HTTP API access and set its local numeric password.
-3. In BarKeep → **Settings**, enter the bar's **Wi-Fi address** and that same
-   password in **Wi-Fi password**.
-4. Select **Wi-Fi** in the connection switch at the top of BarKeep's menu.
+3. In BarKeep → **Settings**, select **Wi-Fi** in the **Connection** control.
+4. Enter the bar's **Wi-Fi address** and that same password in **Wi-Fi password**.
+   The address, device-name editor, password and Wi-Fi setup guidance are shown
+   only while Wi-Fi is selected.
    Select **USB** to return to the fixed USB address. BarKeep remembers the
    selected connection and the Wi-Fi address/password across restarts, so you
    can switch without retyping them. USB does not send the Wi-Fi password.
@@ -111,7 +112,7 @@ other route. After correcting settings or reconnecting the bar, use
 **Settings → Reconnect**. This selects how your Mac reaches the bar; configure
 its Wi-Fi network through the bar's web interface.
 
-![USB and Wi-Fi connection switch in the BarKeep menu](assets/connection-switch.png)
+![USB and Wi-Fi connection control in BarKeep Settings](assets/connection-switch.png)
 
 The password is the one configured on the physical bar. Tokens created at
 `cloud.busy.app` are for the cloud API and will be rejected by the local
