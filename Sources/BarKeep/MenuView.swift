@@ -59,17 +59,6 @@ struct MenuView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
-            Picker("Connection", selection: Bindable(state).connectionMode) {
-                ForEach(DeviceConnectionMode.allCases) { mode in
-                    Text(mode.title).tag(mode)
-                }
-            }
-            .pickerStyle(.segmented)
-            .accessibilityIdentifier("connectionMode")
-            if let help = state.connectionHelp {
-                Text(help)
-                    .font(.caption).foregroundStyle(.orange)
-            }
             Picker("", selection: $tab) {
                 Text("Device").tag(0)
                 Text("Message").tag(1)
@@ -704,6 +693,68 @@ struct TimersTab: View {
 // MARK: - Settings tab
 
 @MainActor
+struct ConnectionSettings: View {
+    @Environment(AppState.self) private var state
+
+    var body: some View {
+        @Bindable var state = state
+        VStack(alignment: .leading, spacing: 8) {
+            Picker("Connection", selection: $state.connectionMode) {
+                ForEach(DeviceConnectionMode.allCases) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("connectionMode")
+
+            if state.connectionMode == .wifi {
+                LabeledContent("Wi-Fi address") {
+                    TextField("busybar.local or IP", text: $state.wifiHost)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 140)
+                }
+                LabeledContent("Device name") {
+                    TextField("BUSY Bar", text: $state.deviceNameText)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 140)
+                        .onSubmit { state.applyDeviceName() }
+                }
+                LabeledContent("Wi-Fi password") {
+                    CompactSecureField(
+                        text: $state.token,
+                        placeholder: "HTTP API password"
+                    )
+                        .frame(width: 140, height: 22)
+                }
+                if let help = state.connectionHelp {
+                    Text(help)
+                        .font(.caption2).foregroundStyle(.orange)
+                }
+                if state.authenticationRejected {
+                    Text("Busy Bar reached, but it rejected the local HTTP API password (HTTP 403). Cloud API tokens do not work with a local IP address.")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if !state.deviceReachable && !state.isConnecting && !state.host.isEmpty {
+                    Text("Wi-Fi device unreachable. Confirm the IP and use a network that allows devices to communicate with each other. Some phone hotspots isolate connected devices.")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Text("Use the bar’s local address and HTTP API password. Configure its Wi-Fi network in the bar’s web interface.")
+                    .font(.caption2).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("Connect the bar by USB. No address or password is needed.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            Button("Reconnect") { Task { await state.refreshDeviceStatus() } }
+                .disabled(state.isConnecting || state.host.isEmpty)
+        }
+    }
+}
+
+@MainActor
 struct SettingsTab: View {
     @Environment(AppState.self) private var state
     @State private var launchAtLogin = false
@@ -712,40 +763,8 @@ struct SettingsTab: View {
     var body: some View {
         @Bindable var state = state
         VStack(alignment: .leading, spacing: 8) {
-            LabeledContent("Wi-Fi address") {
-                TextField("busybar.local or IP", text: $state.wifiHost)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 140)
-            }
-            LabeledContent("Device name") {
-                TextField("BUSY Bar", text: $state.deviceNameText)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 140)
-                    .onSubmit { state.applyDeviceName() }
-            }
-            LabeledContent("Wi-Fi password") {
-                CompactSecureField(
-                    text: $state.token,
-                    placeholder: "HTTP API password"
-                )
-                    .frame(width: 140, height: 22)
-            }
-            if state.authenticationRejected {
-                Text("Busy Bar reached, but it rejected the local HTTP API password (HTTP 403). Cloud API tokens do not work with a local IP address.")
-                    .font(.caption2)
-                    .foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else if !state.deviceReachable && !state.isConnecting && state.connectionMode == .wifi && !state.host.isEmpty {
-                Text("Wi-Fi device unreachable. Confirm the IP and use a network that allows devices to communicate with each other. Some phone hotspots isolate connected devices.")
-                    .font(.caption2)
-                    .foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Text("USB uses 10.0.4.20 without a password. Wi-Fi uses the saved address and local HTTP API password. Changing the connection does not change the bar’s network settings.")
-                .font(.caption2).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            Button("Reconnect") { Task { await state.refreshDeviceStatus() } }
-                .disabled(state.isConnecting || state.host.isEmpty)
+            ConnectionSettings()
+            Divider()
             Picker("On-call theme", selection: $state.theme) {
                 ForEach(state.availableThemes, id: \.self) { theme in
                     Text(themeTitle(theme)).tag(theme)
@@ -823,7 +842,9 @@ struct SettingsTab: View {
 
             Divider()
             HStack {
-                Text("Firmware \(state.firmwareVersion ?? "?") · Wi-Fi \(state.wifiStateText)")
+                Text(state.connectionMode == .wifi
+                    ? "Firmware \(state.firmwareVersion ?? "?") · Wi-Fi \(state.wifiStateText)"
+                    : "Firmware \(state.firmwareVersion ?? "?")")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 Spacer()
