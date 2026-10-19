@@ -18,17 +18,37 @@ struct MessagePreset: Codable, Identifiable, Hashable {
 final class AppState {
     // MARK: - Settings (persisted)
 
-    var host: String {
-        didSet {
-            UserDefaults.standard.set(host, forKey: "host")
-            client.host = host
-            if !deviceReachable {
-                transportType = Self.configuredTransport(for: host)
-            }
+    private var connection: DeviceConnection
+    private let connectionDefaults: UserDefaults
+    private var connectionRevision = 0
+    private var connectionTask: Task<Void, Never>?
+    private(set) var isConnecting = false
+
+    var connectionMode: DeviceConnectionMode {
+        get { connection.mode }
+        set {
+            guard connection.mode != newValue else { return }
+            connection.mode = newValue
+            connectionChanged()
         }
     }
+    var wifiHost: String {
+        get { connection.wifiHost }
+        set {
+            connection.wifiHost = newValue
+            connection.save(to: connectionDefaults)
+            if connectionMode == .wifi { connectionChanged() }
+        }
+    }
+    var host: String { connection.host }
+    var connectionHelp: String? { connection.configurationHelp }
     var token: String {
-        didSet { UserDefaults.standard.set(token, forKey: "token"); client.token = token }
+        get { connection.password }
+        set {
+            connection.password = newValue
+            connection.save(to: connectionDefaults)
+            if connectionMode == .wifi { connectionChanged() }
+        }
     }
     var autoOnCall: Bool {
         didSet {
@@ -181,12 +201,10 @@ final class AppState {
         ("mail", "#0078D4FF"),
     ]
 
-    init() {
-        let defaults = UserDefaults.standard
-        let host = defaults.string(forKey: "host") ?? "10.0.4.20"
-        let token = defaults.string(forKey: "token") ?? ""
-        self.host = host
-        self.token = token
+    init(defaults: UserDefaults = .standard, startServices: Bool = true, session: URLSession? = nil) {
+        let connection = DeviceConnection(defaults: defaults)
+        self.connection = connection
+        self.connectionDefaults = defaults
         self.autoOnCall = defaults.object(forKey: "autoOnCall") as? Bool ?? true
         self.theme = defaults.string(forKey: "theme") ?? "on_air"
         self.triggerSmartHome = defaults.object(forKey: "triggerSmartHome") as? Bool ?? true
@@ -213,9 +231,10 @@ final class AppState {
         self.showWeather = defaults.object(forKey: "showWeather") as? Bool ?? false
         self.pingHost = defaults.string(forKey: "pingHost") ?? "1.1.1.1"
         self.weatherCelsius = defaults.bool(forKey: "weatherCelsius")
-        self.client = BusyBarClient(host: host, token: token)
-        self.transportType = Self.configuredTransport(for: host)
+        self.client = BusyBarClient(host: connection.host, token: connection.token, session: session)
+        self.transportType = connection.mode.rawValue
         self.arcade = ArcadeController(client: self.client)
+        guard startServices else { return }
         localNetworkPermissionTrigger.onAccessAvailable = { [weak self] in
             Task { @MainActor [weak self] in
                 await self?.refreshDeviceStatus()
@@ -247,34 +266,69 @@ final class AppState {
 
     // MARK: - Device status
 
+    private func connectionChanged() {
+        if arcade.isActive { arcade.stop() }
+        connection.save(to: connectionDefaults)
+        connectionRevision += 1
+        connectionTask?.cancel()
+        offDebounceTask?.cancel()
+        client.host = connection.host
+        client.token = connection.token
+        deviceReachable = false
+        authenticationRejected = false
+        isConnecting = false
+        batteryCharge = nil
+        firmwareVersion = nil
+        screenPreview = nil
+        onCall = false
+        weSetBusy = false
+        transportType = connectionMode.rawValue
+        wifiStateText = "unknown"
+        deviceNameText = ""
+        updateCheckText = nil
+        lastError = nil
+        guard !connection.needsWiFiHost else { return }
+        connectionTask = Task { await refreshDeviceStatus() }
+    }
+
     func refreshDeviceStatus() async {
+        guard !connection.needsWiFiHost else { return }
+        let revision = connectionRevision
+        // Snapshot the endpoint so an in-flight refresh cannot mix USB and Wi-Fi
+        // responses or overwrite the newly selected connection's state.
+        let endpoint = client.snapshot()
+        isConnecting = true
+        defer { if revision == connectionRevision { isConnecting = false } }
         do {
-            let status = try await client.status()
+            let status = try await endpoint.status()
+            guard revision == connectionRevision, !Task.isCancelled else { return }
             deviceReachable = true
             authenticationRejected = false
             batteryCharge = status.power.battery_charge
             firmwareVersion = status.firmware.version
-            let busyType = try await client.currentBusyType()
+            let busyType = try await endpoint.currentBusyType()
+            guard revision == connectionRevision, !Task.isCancelled else { return }
             onCall = busyType != "NOT_STARTED"
-            if onCall, arcade.isActive {
-                arcade.stop()
-            }
-            if let themes = try? await client.listThemes(), !themes.isEmpty {
-                availableThemes = themes
-            }
-            if let value = try? await client.brightness() { brightnessValue = value }
-            if let value = try? await client.volume() { volumeValue = value }
-            if let value = try? await client.transport() { transportType = value }
-            if let value = try? await client.wifiState() { wifiStateText = value }
-            if let value = try? await client.deviceName() { deviceNameText = value }
+            if onCall, arcade.isActive { arcade.stop() }
+            let themes = try? await endpoint.listThemes()
+            let brightness = try? await endpoint.brightness()
+            let volume = try? await endpoint.volume()
+            let wifiState = try? await endpoint.wifiState()
+            let name = try? await endpoint.deviceName()
+            guard revision == connectionRevision, !Task.isCancelled else { return }
+            if let themes, !themes.isEmpty { availableThemes = themes }
+            if let brightness { brightnessValue = brightness }
+            if let volume { volumeValue = volume }
+            if let wifiState { wifiStateText = wifiState }
+            if let name { deviceNameText = name }
         } catch {
+            guard revision == connectionRevision, !Task.isCancelled else { return }
             deviceReachable = false
             authenticationRejected = Self.isAuthenticationError(error)
             batteryCharge = nil
-            transportType = Self.configuredTransport(for: host)
-            if arcade.isActive {
-                arcade.stop()
-            }
+            screenPreview = nil
+            firmwareVersion = nil
+            if arcade.isActive { arcade.stop() }
         }
     }
 
@@ -291,11 +345,22 @@ final class AppState {
     /// Runs while the popover is visible; keeps the live preview fresh.
     func previewLoop() async {
         while !Task.isCancelled {
-            if let frame = try? await client.screenFrame() {
-                screenPreview = Self.cgImage(from: frame)
-                deviceReachable = true
-            } else {
-                screenPreview = nil
+            let revision = connectionRevision
+            let endpoint = client.snapshot()
+            if !connection.needsWiFiHost {
+                do {
+                    let frame = try await endpoint.screenFrame()
+                    guard revision == connectionRevision, !Task.isCancelled else { continue }
+                    screenPreview = Self.cgImage(from: frame)
+                    deviceReachable = true
+                    authenticationRejected = false
+                } catch {
+                    guard revision == connectionRevision, !Task.isCancelled else { continue }
+                    screenPreview = nil
+                    deviceReachable = false
+                    authenticationRejected = Self.isAuthenticationError(error)
+                    batteryCharge = nil
+                }
             }
             try? await Task.sleep(for: .seconds(1))
         }
@@ -347,13 +412,16 @@ final class AppState {
     }
 
     func checkForUpdate() {
+        let revision = connectionRevision
+        let endpoint = client.snapshot()
         updateCheckText = "Checking…"
         Task {
             do {
-                try await client.startUpdateCheck()
+                try await endpoint.startUpdateCheck()
                 for _ in 0..<15 {
                     try await Task.sleep(for: .seconds(2))
-                    let status = try await client.updateStatus()
+                    let status = try await endpoint.updateStatus()
+                    guard revision == connectionRevision else { return }
                     switch status.check.status {
                     case "ok", "success":
                         updateCheckText = status.check.available_version.isEmpty
@@ -367,8 +435,10 @@ final class AppState {
                         continue
                     }
                 }
+                guard revision == connectionRevision else { return }
                 updateCheckText = "Check timed out"
             } catch {
+                guard revision == connectionRevision else { return }
                 updateCheckText = "Check failed: \(error.localizedDescription)"
             }
         }
@@ -565,6 +635,8 @@ final class AppState {
     }
 
     func setOnCall(_ on: Bool, automatic: Bool = false) {
+        let revision = connectionRevision
+        let endpoint = client.snapshot()
         Task {
             do {
                 if on, arcade.isActive {
@@ -572,13 +644,15 @@ final class AppState {
                 }
                 if on && automatic {
                     // Don't stomp a busy session the user started elsewhere.
-                    let current = try await client.currentBusyType()
+                    let current = try await endpoint.currentBusyType()
+                    guard revision == connectionRevision else { return }
                     if current != "NOT_STARTED" && !weSetBusy {
                         onCall = true
                         return
                     }
                 }
-                try await client.setBusy(on, theme: theme, triggerSmartHome: triggerSmartHome)
+                try await endpoint.setBusy(on, theme: theme, triggerSmartHome: triggerSmartHome)
+                guard revision == connectionRevision else { return }
                 onCall = on
                 weSetBusy = on
                 deviceReachable = true
@@ -590,6 +664,7 @@ final class AppState {
                     }
                 }
             } catch {
+                guard revision == connectionRevision else { return }
                 lastError = error.localizedDescription
                 await refreshDeviceStatus()
             }
