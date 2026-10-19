@@ -19,7 +19,7 @@ final class AppState {
     // MARK: - Settings (persisted)
 
     private var connection: DeviceConnection
-    private let connectionDefaults: UserDefaults
+    private let defaults: UserDefaults
     private var connectionRevision = 0
     private var connectionTask: Task<Void, Never>?
     private(set) var isConnecting = false
@@ -36,8 +36,8 @@ final class AppState {
         get { connection.wifiHost }
         set {
             connection.wifiHost = newValue
-            connection.save(to: connectionDefaults)
-            if connectionMode == .wifi { connectionChanged() }
+            connection.save(to: defaults)
+            if connectionMode == .wifi { connectionChanged(resetBusyOwnership: true) }
         }
     }
     var host: String { connection.host }
@@ -46,39 +46,39 @@ final class AppState {
         get { connection.password }
         set {
             connection.password = newValue
-            connection.save(to: connectionDefaults)
+            connection.save(to: defaults)
             if connectionMode == .wifi { connectionChanged() }
         }
     }
     var autoOnCall: Bool {
         didSet {
-            UserDefaults.standard.set(autoOnCall, forKey: "autoOnCall")
+            defaults.set(autoOnCall, forKey: "autoOnCall")
             syncAutoBusy()
         }
     }
     var theme: String {
-        didSet { UserDefaults.standard.set(theme, forKey: "theme") }
+        didSet { defaults.set(theme, forKey: "theme") }
     }
     var triggerSmartHome: Bool {
-        didSet { UserDefaults.standard.set(triggerSmartHome, forKey: "triggerSmartHome") }
+        didSet { defaults.set(triggerSmartHome, forKey: "triggerSmartHome") }
     }
     /// Seconds the mic must stay idle before "on call" is cleared.
     var offDebounceSeconds: Double {
-        didSet { UserDefaults.standard.set(offDebounceSeconds, forKey: "offDebounceSeconds") }
+        didSet { defaults.set(offDebounceSeconds, forKey: "offDebounceSeconds") }
     }
     var forwardNotifications: Bool {
         didSet {
-            UserDefaults.standard.set(forwardNotifications, forKey: "forwardNotifications")
+            defaults.set(forwardNotifications, forKey: "forwardNotifications")
             forwardNotifications ? notificationWatcher.start() : notificationWatcher.stop()
         }
     }
     /// Comma-separated bundle-ID substrings to forward; empty forwards everything.
     var notificationAppFilter: String {
-        didSet { UserDefaults.standard.set(notificationAppFilter, forKey: "notificationAppFilter") }
+        didSet { defaults.set(notificationAppFilter, forKey: "notificationAppFilter") }
     }
     var calendarAutoBusy: Bool {
         didSet {
-            UserDefaults.standard.set(calendarAutoBusy, forKey: "calendarAutoBusy")
+            defaults.set(calendarAutoBusy, forKey: "calendarAutoBusy")
             if calendarAutoBusy {
                 Task {
                     _ = await calendarMonitor.requestAccess()
@@ -91,48 +91,48 @@ final class AppState {
     }
     /// Play a chime on the bar's speaker when a notification is forwarded.
     var notificationChime: Bool {
-        didSet { UserDefaults.standard.set(notificationChime, forKey: "notificationChime") }
+        didSet { defaults.set(notificationChime, forKey: "notificationChime") }
     }
     /// Hold notifications that arrive during a call and replay them after.
     var queueDuringCalls: Bool {
-        didSet { UserDefaults.standard.set(queueDuringCalls, forKey: "queueDuringCalls") }
+        didSet { defaults.set(queueDuringCalls, forKey: "queueDuringCalls") }
     }
     var presets: [MessagePreset] {
         didSet {
             if let data = try? JSONEncoder().encode(presets) {
-                UserDefaults.standard.set(data, forKey: "presets")
+                defaults.set(data, forKey: "presets")
             }
         }
     }
     var slackSyncEnabled: Bool {
-        didSet { UserDefaults.standard.set(slackSyncEnabled, forKey: "slackSyncEnabled") }
+        didSet { defaults.set(slackSyncEnabled, forKey: "slackSyncEnabled") }
     }
     var slackToken: String {
         didSet {
-            UserDefaults.standard.set(slackToken, forKey: "slackToken")
+            defaults.set(slackToken, forKey: "slackToken")
             slackSync.token = slackToken
         }
     }
     /// Show live network latency in the bar's bottom-right corner.
     var showPing: Bool {
         didSet {
-            UserDefaults.standard.set(showPing, forKey: "showPing")
+            defaults.set(showPing, forKey: "showPing")
             syncPingLoop()
         }
     }
     /// Show local weather (icon + temperature) on the bar's left side.
     var showWeather: Bool {
         didSet {
-            UserDefaults.standard.set(showWeather, forKey: "showWeather")
+            defaults.set(showWeather, forKey: "showWeather")
             syncWeatherLoop()
         }
     }
     var pingHost: String {
-        didSet { UserDefaults.standard.set(pingHost, forKey: "pingHost") }
+        didSet { defaults.set(pingHost, forKey: "pingHost") }
     }
     var weatherCelsius: Bool {
         didSet {
-            UserDefaults.standard.set(weatherCelsius, forKey: "weatherCelsius")
+            defaults.set(weatherCelsius, forKey: "weatherCelsius")
             syncWeatherLoop()
         }
     }
@@ -204,7 +204,7 @@ final class AppState {
     init(defaults: UserDefaults = .standard, startServices: Bool = true, session: URLSession? = nil) {
         let connection = DeviceConnection(defaults: defaults)
         self.connection = connection
-        self.connectionDefaults = defaults
+        self.defaults = defaults
         self.autoOnCall = defaults.object(forKey: "autoOnCall") as? Bool ?? true
         self.theme = defaults.string(forKey: "theme") ?? "on_air"
         self.triggerSmartHome = defaults.object(forKey: "triggerSmartHome") as? Bool ?? true
@@ -266,12 +266,18 @@ final class AppState {
 
     // MARK: - Device status
 
-    private func connectionChanged() {
+    private func connectionChanged(resetBusyOwnership: Bool = false) {
         if arcade.isActive { arcade.stop() }
-        connection.save(to: connectionDefaults)
+        connection.save(to: defaults)
         connectionRevision += 1
         connectionTask?.cancel()
-        offDebounceTask?.cancel()
+        // USB and Wi-Fi are two routes to the same bar. Retain ownership of
+        // our busy session so a later mic-off can still clear it. Editing the
+        // Wi-Fi address may select a different device, so discard ownership.
+        if resetBusyOwnership {
+            offDebounceTask?.cancel()
+            weSetBusy = false
+        }
         client.host = connection.host
         client.token = connection.token
         deviceReachable = false
@@ -281,7 +287,6 @@ final class AppState {
         firmwareVersion = nil
         screenPreview = nil
         onCall = false
-        weSetBusy = false
         transportType = connectionMode.rawValue
         wifiStateText = "unknown"
         deviceNameText = ""
@@ -515,14 +520,14 @@ final class AppState {
 
     /// Human-readable current weather location for the settings UI.
     var weatherLocationLabel: String {
-        UserDefaults.standard.string(forKey: "weatherCity") ?? "Automatic (IP-based)"
+        defaults.string(forKey: "weatherCity") ?? "Automatic (IP-based)"
     }
 
     /// Empty query reverts to automatic IP-based location; otherwise the
     /// city name is geocoded and pinned.
     func applyWeatherLocation(_ query: String) {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
-        let defaults = UserDefaults.standard
+        let defaults = defaults
         if trimmed.isEmpty {
             defaults.removeObject(forKey: "weatherLat")
             defaults.removeObject(forKey: "weatherLon")

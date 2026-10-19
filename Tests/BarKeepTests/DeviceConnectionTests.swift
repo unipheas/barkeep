@@ -91,6 +91,37 @@ final class DeviceConnectionTests: XCTestCase {
     }
 
     @MainActor
+    func testSwitchKeepsOwnershipSoAutomaticBusyCanStillClearOnNewRoute() async {
+        defaults.set("busybar.local", forKey: "wifiHost")
+        let started = expectation(description: "Started busy on USB")
+        let cleared = expectation(description: "Cleared own busy session over Wi-Fi")
+        ConnectionURLProtocol.handler = { request, complete in
+            if request.httpMethod == "PUT" && request.url?.path == "/api/busy/snapshot" {
+                if request.url?.host == "10.0.4.20" { started.fulfill() }
+                else { cleared.fulfill() }
+                complete(.success((200, "{}")))
+            } else if request.url?.path == "/api/status" {
+                complete(.success((200, Self.status)))
+            } else if request.url?.path == "/api/busy/snapshot" {
+                complete(.success((200, "{\"snapshot\":{\"type\":\"INFINITE\"}}")))
+            } else { complete(.success((200, "{}"))) }
+        }
+        let state = AppState(defaults: defaults, startServices: false, session: makeSession())
+        state.setOnCall(true)
+        await fulfillment(of: [started], timeout: 3)
+        for _ in 0..<100 where !state.onCall { try? await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(state.onCall)
+        state.connectionMode = .wifi
+        for _ in 0..<100 where !state.onCall || state.isConnecting { try? await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(state.onCall)
+        state.offDebounceSeconds = 0
+        state.autoOnCall = false
+        await fulfillment(of: [cleared], timeout: 3)
+        for _ in 0..<100 where state.onCall { try? await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertFalse(state.onCall)
+    }
+
+    @MainActor
     func testLateOldResponseCannotMarkNewConnectionReachable() async {
         defaults.set("busybar.local", forKey: "wifiHost")
         let oldRequest = expectation(description: "Old USB request started")
