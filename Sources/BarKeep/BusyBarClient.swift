@@ -60,6 +60,12 @@ final class BusyBarClient: @unchecked Sendable {
         self.session = session ?? URLSession(configuration: config, delegate: NoRedirectDelegate(), delegateQueue: nil)
     }
 
+    /// Pin multi-request operations to their starting device and credentials.
+    func snapshot() -> BusyBarClient {
+        BusyBarClient(host: host, token: token, session: session)
+
+    }
+
     func request(_ method: String, _ path: String, query: [String: String] = [:], body: Data? = nil, contentType: String = "application/json") throws -> URLRequest {
         guard path.hasPrefix("/"), !path.contains(".."), !path.contains("?"), !path.contains("#"), !path.contains("://") else {
             throw BusyBarError(message: "Invalid local API path")
