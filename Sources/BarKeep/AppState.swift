@@ -20,7 +20,8 @@ final class AppState {
 
     private var connection: DeviceConnection
     private let defaults: UserDefaults
-    private var connectionRevision = 0
+    private let weatherSession: URLSession
+    private(set) var connectionRevision = 0
     private var connectionTask: Task<Void, Never>?
     private(set) var isConnecting = false
 
@@ -192,6 +193,7 @@ final class AppState {
     private var weatherTask: Task<Void, Never>?
     private(set) var latestWeather: WeatherReading?
     private(set) var widgetsPausedForApp = false
+    private var launchedDeviceAppID: String?
     private var lastWeatherIconEmoji: String?
     private var queuedNotifications: [String] = []
     /// True when this app started the busy session (so we only clear our own).
@@ -204,10 +206,11 @@ final class AppState {
         ("mail", "#0078D4FF"),
     ]
 
-    init(defaults: UserDefaults = .standard, startServices: Bool = true, session: URLSession? = nil, slackSession: URLSession = .shared) {
+    init(defaults: UserDefaults = .standard, startServices: Bool = true, session: URLSession? = nil, slackSession: URLSession = .shared, weatherSession: URLSession = .shared) {
         let connection = DeviceConnection(defaults: defaults)
         self.connection = connection
         self.defaults = defaults
+        self.weatherSession = weatherSession
         self.autoOnCall = defaults.object(forKey: "autoOnCall") as? Bool ?? true
         self.theme = defaults.string(forKey: "theme") ?? "on_air"
         self.triggerSmartHome = defaults.object(forKey: "triggerSmartHome") as? Bool ?? true
@@ -282,8 +285,7 @@ final class AppState {
             offDebounceTask?.cancel()
             weSetBusy = false
         }
-        client.host = connection.host
-        client.token = connection.token
+        client.configure(host: connection.host, token: connection.token)
         if widgetsPausedForApp { resumeWidgets() }
         deviceReachable = false
         authenticationRejected = false
@@ -353,7 +355,7 @@ final class AppState {
     }
 
     /// Runs while the popover is visible; keeps the live preview fresh.
-    func previewLoop() async {
+    func previewLoop(interval: Duration = .seconds(1)) async {
         while !Task.isCancelled {
             let revision = connectionRevision
             let endpoint = client.snapshot()
@@ -372,17 +374,17 @@ final class AppState {
                     batteryCharge = nil
                 }
             }
-            try? await Task.sleep(for: .seconds(1))
+            try? await Task.sleep(for: interval)
         }
     }
 
     private static func cgImage(from frame: ScreenFrame) -> CGImage? {
         var rgba = Data(capacity: frame.width * frame.height * 4)
-        let pixels = frame.grbPixels
+        let pixels = frame.bgrPixels
         for i in stride(from: 0, to: frame.width * frame.height * 3, by: 3) {
-            rgba.append(pixels[pixels.startIndex + i + 1]) // R (stream is GRB)
-            rgba.append(pixels[pixels.startIndex + i])     // G
-            rgba.append(pixels[pixels.startIndex + i + 2]) // B
+            rgba.append(pixels[pixels.startIndex + i + 2]) // R (stream is BGR)
+            rgba.append(pixels[pixels.startIndex + i + 1]) // G
+            rgba.append(pixels[pixels.startIndex + i])     // B
             rgba.append(0xFF)
         }
         guard let provider = CGDataProvider(data: rgba as CFData) else { return nil }
@@ -450,7 +452,7 @@ final class AppState {
         }
     }
 
-    func checkForUpdate() {
+    func checkForUpdate(pollInterval: Duration = .seconds(2)) {
         let revision = connectionRevision
         let endpoint = client.snapshot()
         updateCheckText = "Checking…"
@@ -458,7 +460,7 @@ final class AppState {
             do {
                 try await endpoint.startUpdateCheck()
                 for _ in 0..<15 {
-                    try await Task.sleep(for: .seconds(2))
+                    try await Task.sleep(for: pollInterval)
                     let status = try await endpoint.updateStatus()
                     guard revision == connectionRevision else { return }
                     switch status.check.status {
@@ -531,6 +533,7 @@ final class AppState {
     /// Device apps own their display. Pause our recurring overlays until Stop or
     /// Resume Widgets, without changing the user's saved widget preferences.
     func launchDeviceApp(_ app: DeviceApp, on endpoint: BusyBarClient) async throws {
+        _ = try endpoint.appQuery(app.id)
         let revision = connectionRevision
         let wasPaused = widgetsPausedForApp
         widgetsPausedForApp = true
@@ -543,6 +546,7 @@ final class AppState {
             guard revision == connectionRevision else { throw BusyBarError(message: "Device changed. Launch the app again.") }
             try await endpoint.clearDisplay()
             try await endpoint.launchApp(id: app.id)
+            if revision == connectionRevision { launchedDeviceAppID = app.id }
         } catch {
             if revision == connectionRevision, !wasPaused { resumeWidgets() }
             throw error
@@ -551,8 +555,13 @@ final class AppState {
 
     func resumeWidgets() {
         widgetsPausedForApp = false
+        launchedDeviceAppID = nil
         if showPing { syncPingLoop() }
         if showWeather { syncWeatherLoop() }
+    }
+
+    func deviceAppRemoved(_ app: DeviceApp) {
+        if launchedDeviceAppID == app.id { resumeWidgets() }
     }
 
     private func syncPingLoop() {
@@ -607,7 +616,7 @@ final class AppState {
             return
         }
         Task {
-            guard let place = await WeatherMonitor.geocode(trimmed) else {
+            guard let place = await WeatherMonitor.geocode(trimmed, session: weatherSession) else {
                 lastError = "Could not find “\(trimmed)”"
                 return
             }
@@ -640,7 +649,7 @@ final class AppState {
                 // Re-fetch every 10 min; redraw every 60 s to keep the
                 // elements alive (150 s timeout lets them fade if we stop).
                 if Date().timeIntervalSince(lastFetch) > 600 {
-                    if let reading = await WeatherMonitor.fetch() {
+                    if let reading = await WeatherMonitor.fetch(defaults: self.defaults, session: self.weatherSession) {
                         self.latestWeather = reading
                         lastFetch = Date()
                     }

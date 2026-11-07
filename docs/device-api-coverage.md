@@ -67,3 +67,18 @@ remains ongoing; this is not a blanket claim that every interaction passed.
 The CLI entry point is also tested against a local HTTP fixture. Agent-hook
 tests use private temporary state and mocked delivery; no real Slack status,
 agent notification, or personal calendar data is used by the unit suite.
+
+A second pass exercised live status start/stop/export, rejected an empty required
+parameter before confirmation, set/read/restored brightness, sent a text message,
+started/ended both timer types, and started Arcade then returned with Escape.
+With ping enabled, launching the disposable JS app paused the widget; removing
+that app resumed it. The test package was removed, ping and Arcade preview were
+returned to their original off state, and smart-home triggering and the native
+idle busy snapshot were restored. No existing device apps were removed.
+
+Fast drawing drags revealed missing pixels between input samples, now fixed by
+connecting samples. A red drawing revealed that screen bytes were interpreted
+as GRB instead of the vendor's BGR; the preview now uses BGR and rear-screen L4
+frames are expanded correctly. Regression tests check both formats. The live
+retest showed a continuous red stroke matching the canvas. Emoji search,
+rendered-image delivery, and temporary preset creation/removal also passed.

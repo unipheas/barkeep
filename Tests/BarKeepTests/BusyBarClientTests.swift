@@ -2,6 +2,21 @@ import XCTest
 @testable import BarKeep
 
 final class BusyBarClientTests: XCTestCase {
+    func testConcurrentConnectionChangesNeverMixHostAndPassword() {
+        let client=BusyBarClient(host:"first.test",token:"first")
+        DispatchQueue.concurrentPerform(iterations:1000) { index in
+            let host=index % 2 == 0 ? "first" : "second"
+            client.configure(host:host+".test",token:host)
+            do {
+                let request=try client.request("GET","/status")
+                let password=request.value(forHTTPHeaderField:"X-API-Token")
+                XCTAssertEqual(request.url?.host,password.map { $0+".test" })
+                let snapshot=client.snapshot()
+                XCTAssertEqual(snapshot.host,snapshot.token+".test")
+            } catch { XCTFail(error.localizedDescription) }
+        }
+    }
+
     func testBrowserURLIsNormalizedToAnAPIHost() {
         XCTAssertEqual(
             BusyBarClient.normalizedHost("http://10.69.1.15/login"),

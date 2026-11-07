@@ -44,6 +44,28 @@ final class MonitorTests: XCTestCase {
         invalid.stop()
     }
 
+    func testNotificationLifecycleAndUnreadableDatabaseFixtures() throws {
+        let folder=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true)
+        defer { try? FileManager.default.removeItem(at:folder) }
+        let corrupt=folder.appendingPathComponent("corrupt.db")
+        try Data("not a database".utf8).write(to:corrupt)
+        let empty=folder.appendingPathComponent("empty.db")
+        try Data().write(to:empty)
+        let missing=folder.appendingPathComponent("usernoted-missing.db")
+        let watcher=NotificationWatcher(paths:[corrupt.path,empty.path,missing.path,folder.path])
+        let denied=expectation(description:"No accessible notification database")
+        let stopped=expectation(description:"Watcher stopped")
+        watcher.onStatusChange={ status in
+            if status == .noAccess { denied.fulfill() }
+            if status == .stopped { stopped.fulfill() }
+        }
+        watcher.start(); watcher.start()
+        wait(for:[denied],timeout:2)
+        watcher.stop()
+        wait(for:[stopped],timeout:2)
+    }
+
     func testWeatherUsesConfiguredLocationUnitsAndHandlesBadResponses() async throws {
         let suite = "dev.barkeep.weather-tests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName:suite)!
@@ -76,6 +98,35 @@ final class MonitorTests: XCTestCase {
         }
         HTTPStub.handler = { _ in (500,Data()) }
         let failed = await WeatherMonitor.fetch(defaults:defaults,session:session); XCTAssertNil(failed)
+    }
+
+    func testWeatherMissingFieldsAndUnsafeTemperature() async throws {
+        let suite="dev.barkeep.weather-fallback.\(UUID().uuidString)"
+        let defaults=UserDefaults(suiteName:suite)!
+        defer { defaults.removePersistentDomain(forName:suite); HTTPStub.handler=nil }
+        let session=HTTPStub.session()
+        defaults.set(0.0,forKey:"weatherLat"); defaults.set(0.0,forKey:"weatherLon")
+        for body in ["{}",#"{"current":{}}"#,#"{"current":{"temperature_2m":1e300}}"#] {
+            HTTPStub.handler={ _ in (200,Data(body.utf8)) }
+            let value=await WeatherMonitor.fetch(defaults:defaults,session:session)
+            XCTAssertNil(value)
+        }
+        HTTPStub.handler={ _ in (200,Data(#"{"current":{"temperature_2m":20}}"#.utf8)) }
+        let custom=await WeatherMonitor.fetch(defaults:defaults,session:session)
+        XCTAssertEqual(custom?.city,"custom")
+        defaults.removeObject(forKey:"weatherLat"); defaults.removeObject(forKey:"weatherLon")
+        HTTPStub.handler={ request in
+            if request.url?.host == "ipinfo.io" { return (200,Data(#"{"loc":"0,0"}"#.utf8)) }
+            if request.url?.host == "geocoding-api.open-meteo.com" { return (200,Data(#"{"results":[{"latitude":0,"longitude":0}]}"#.utf8)) }
+            return (200,Data(#"{"current":{"temperature_2m":20}}"#.utf8))
+        }
+        let automatic=await WeatherMonitor.fetch(defaults:defaults,session:session)
+        XCTAssertEqual(automatic?.city,"?")
+        let city=await WeatherMonitor.geocode("Fallback",session:session)
+        XCTAssertEqual(city?.city,"Fallback")
+        let slack=SlackSync(session:session); slack.token="fixture"
+        HTTPStub.handler={ _ in (-1,Data()) }
+        let error=await slack.setBusy(true); XCTAssertTrue(error!.contains("HTTP 0"))
     }
 
     func testEmojiSearchAndIconVariants() throws {

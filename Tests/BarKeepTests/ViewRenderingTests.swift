@@ -26,6 +26,7 @@ final class ViewRenderingTests: XCTestCase {
             ("settings",AnyView(SettingsTab().environment(state)),372),
             ("device-controls",AnyView(DeviceToolsView().environment(state)),900),
             ("canvas",AnyView(CanvasView().environment(state)),896),
+            ("status-stream",AnyView(StatusStreamView().environment(state)),820),
         ]
         for (name,view,width) in views {
             try await render(view,name:name,width:width)

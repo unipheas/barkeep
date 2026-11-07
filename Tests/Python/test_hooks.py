@@ -43,6 +43,7 @@ class HookTests(unittest.TestCase):
 
     def test_state_rejects_symlinks_and_public_directories(self):
         self.directory.mkdir(mode=0o755)
+        self.directory.chmod(0o755)
         with self.assertRaises(ValueError): h.stamp_path('agent','session')
         self.directory.chmod(0o700)
         stamp=h.stamp_path('Test agent','session')

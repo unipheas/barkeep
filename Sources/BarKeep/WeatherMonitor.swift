@@ -27,7 +27,8 @@ enum WeatherMonitor {
         guard let url = components.url,
               let json = await getJSON(url, session: session),
               let current = json["current"] as? [String: Any],
-              let temp = current["temperature_2m"] as? Double else { return nil }
+              let temp = current["temperature_2m"] as? Double,
+              temp.isFinite, (-1000...1000).contains(temp) else { return nil }
         let code = current["weather_code"] as? Int ?? 0
         return WeatherReading(
             temperature: temp,

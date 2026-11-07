@@ -11,10 +11,11 @@ struct AppsTab: View {
             if let model { AppsContent(model: model) }
             else { ProgressView().controlSize(.small) }
         }
-        .task(id: state.host) {
+        .task(id: state.connectionRevision) {
             let model = DeviceAppsModel(client: state.client,
                 launchAction: { client, app in try await state.launchDeviceApp(app, on: client) },
-                stopAction: { state.resumeWidgets() })
+                stopAction: { state.resumeWidgets() },
+                removeAction: { state.deviceAppRemoved($0) })
             self.model = model
             await model.refresh()
         }

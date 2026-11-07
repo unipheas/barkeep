@@ -15,6 +15,7 @@ struct CanvasView: View {
     @State private var color = Color.red
     @State private var erasing = false
     @State private var timeoutSeconds = 30
+    @State private var lastPaintedCell: CanvasCell?
 
     private let cellSize: CGFloat = 12
 
@@ -25,6 +26,7 @@ struct CanvasView: View {
                 Toggle("Eraser", isOn: $erasing)
                     .toggleStyle(.button)
                 Button("Clear Canvas") {
+                    lastPaintedCell = nil
                     grid = Array(
                         repeating: Array(repeating: nil, count: Self.columns),
                         count: Self.rows
@@ -92,13 +94,43 @@ struct CanvasView: View {
         .gesture(
             DragGesture(minimumDistance: 0)
                 .onChanged { value in paint(at: value.location) }
+                .onEnded { _ in lastPaintedCell = nil }
         )
     }
 
     private func paint(at point: CGPoint) {
-        let x = Int(point.x / cellSize)
-        let y = Int(point.y / cellSize)
-        guard (0..<Self.columns).contains(x), (0..<Self.rows).contains(y) else { return }
-        grid[y][x] = erasing ? nil : MessageRenderer.rgbaHex(from: NSColor(color))
+        guard point.x >= 0, point.y >= 0,
+              point.x < CGFloat(Self.columns) * cellSize,
+              point.y < CGFloat(Self.rows) * cellSize else {
+            lastPaintedCell = nil
+            return
+        }
+        let cell = CanvasCell(x: Int(point.x / cellSize), y: Int(point.y / cellSize))
+        let hex = erasing ? nil : MessageRenderer.rgbaHex(from: NSColor(color))
+        for pixel in CanvasCell.line(from: lastPaintedCell ?? cell, to: cell) {
+            grid[pixel.y][pixel.x] = hex
+        }
+        lastPaintedCell = cell
+    }
+}
+
+/// Connect successive input samples so fast drags leave a continuous stroke.
+struct CanvasCell: Equatable {
+    let x: Int
+    let y: Int
+
+    static func line(from start: Self, to end: Self) -> [Self] {
+        var x = start.x, y = start.y
+        let dx = abs(end.x - x), dy = -abs(end.y - y)
+        let sx = x < end.x ? 1 : -1, sy = y < end.y ? 1 : -1
+        var error = dx + dy
+        var cells: [Self] = []
+        while true {
+            cells.append(Self(x: x, y: y))
+            if x == end.x && y == end.y { return cells }
+            let twiceError = 2 * error
+            if twiceError >= dy { error += dy; x += sx }
+            if twiceError <= dx { error += dx; y += sy }
+        }
     }
 }

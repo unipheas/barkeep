@@ -34,7 +34,7 @@ final class LiveDeviceTests: XCTestCase {
             try await client.launchApp(id:"app.barkeep.qa")
             try await Task.sleep(for:.seconds(2))
             let frame = try await client.screenFrame()
-            XCTAssertTrue(frame.grbPixels.contains { $0 != 0 },"Running app should draw visible pixels")
+            XCTAssertTrue(frame.bgrPixels.contains { $0 != 0 },"Running app should draw visible pixels")
             try await client.quitApp()
             try await client.removeApp(id:"app.barkeep.qa")
         } catch {

@@ -70,7 +70,7 @@ final class IntegrationTests: XCTestCase {
             case "/api/update/status": result = #"{"check":{"available_version":"1.3.1","event":"stop","status":"available"}}"#
             case "/api/screen":
                 let back = request.url!.query == "display=1"
-                return (200, Data(Data(repeating: 0, count: back ? 160*80*3 : 72*16*3).base64EncodedString().utf8))
+                return (200, Data(Data(repeating: back ? 0xF3 : 0, count: back ? 160*80/2 : 72*16*3).base64EncodedString().utf8))
             default: result = #"{"result":"OK"}"#
             }
             return (200,Data(result.utf8))
@@ -92,6 +92,10 @@ final class IntegrationTests: XCTestCase {
         try await client.clearDisplay()
         let front = try await client.screenFrame(); XCTAssertEqual(front.width,72)
         let back = try await client.screenFrame(display:1); XCTAssertEqual(back.width,160)
+        XCTAssertEqual(back.bgrPixels.count,160*80*3)
+        XCTAssertEqual(Array(back.bgrPixels.prefix(6)),[51,51,51,255,255,255])
+        do { _ = try await client.screenFrame(display:2); XCTFail("Invalid display accepted") }
+        catch { XCTAssertTrue(error.localizedDescription.contains("Display must")) }
         let brightness = try await client.brightness(); XCTAssertEqual(brightness,"auto")
         try await client.setBrightness("50")
         let volume = try await client.volume(); XCTAssertEqual(volume,80)

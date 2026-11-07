@@ -21,7 +21,7 @@ final class AppStateTests: XCTestCase {
         HTTPStub.handler = nil
     }
     @MainActor private func state() -> AppState {
-        AppState(defaults:defaults,startServices:false,session:HTTPStub.session(),slackSession:HTTPStub.session())
+        AppState(defaults:defaults,startServices:false,session:HTTPStub.session(),slackSession:HTTPStub.session(),weatherSession:HTTPStub.session())
     }
     @MainActor private func eventually(_ predicate: () -> Bool, file: StaticString = #filePath, line: UInt = #line) async {
         for _ in 0..<200 {
@@ -204,6 +204,99 @@ final class AppStateTests: XCTestCase {
         }
     }
 
+    @MainActor func testFirmwareUpdatePollingOutcomes() async {
+        let app=state()
+        for (status,version,expected) in [("available","1.4.0","Update available: 1.4.0"),
+                                           ("not_available","","Up to date"),("failure","","Check failed"),
+                                           ("pending","","Check timed out")] {
+            HTTPStub.handler={ request in
+                if request.url?.path == "/api/update/status" {
+                    return (200,Data("{\"check\":{\"status\":\"\(status)\",\"available_version\":\"\(version)\",\"event\":\"stop\"}}".utf8))
+                }
+                return (200,Data())
+            }
+            app.checkForUpdate(pollInterval:.milliseconds(1))
+            await eventually { app.updateCheckText != "Checking…" }
+            XCTAssertTrue(app.updateCheckText!.contains(expected))
+        }
+        HTTPStub.handler={ _ in (500,Data()) }
+        app.checkForUpdate(pollInterval:.milliseconds(1))
+        await eventually { app.updateCheckText != "Checking…" }
+        XCTAssertTrue(app.updateCheckText!.contains("HTTP 500"))
+    }
+
+    @MainActor func testPreviewLoopPixelsAuthenticationAndCancellation() async {
+        let app=state()
+        let bytes=Data(Array(repeating:[UInt8(0x33),0x22,0xEE],count:72*16).flatMap { $0 })
+        HTTPStub.handler={ _ in (200,Data(bytes.base64EncodedString().utf8)) }
+        let preview=Task { await app.previewLoop(interval:.milliseconds(5)) }
+        await eventually { app.screenPreview != nil }
+        XCTAssertTrue(app.deviceReachable)
+        XCTAssertEqual(app.screenPreview?.width,72)
+        let rendered = app.screenPreview!.dataProvider!.data! as Data
+        XCTAssertEqual(Array(rendered.prefix(4)),[0xEE,0x22,0x33,0xFF], "Device BGR must render as RGBA")
+        preview.cancel(); await preview.value
+        HTTPStub.handler={ _ in (403,Data()) }
+        let failed=Task { await app.previewLoop(interval:.milliseconds(5)) }
+        await eventually { app.authenticationRejected }
+        XCTAssertNil(app.screenPreview); XCTAssertFalse(app.deviceReachable)
+        failed.cancel(); await failed.value
+    }
+
+    @MainActor func testWeatherLocationAndWidgetLifecycle() async {
+        let app=state()
+        let displayed=expectation(description:"Weather displayed")
+        displayed.assertForOverFulfill=false
+        HTTPStub.handler={ request in
+            switch request.url?.host {
+            case "geocoding-api.open-meteo.com":
+                return (200,Data(#"{"results":[{"latitude":1,"longitude":2,"name":"Fixture City"}]}"#.utf8))
+            case "api.open-meteo.com":
+                return (200,Data(#"{"current":{"temperature_2m":20,"weather_code":0}}"#.utf8))
+            default:
+                if request.url?.path == "/api/display/draw",request.httpMethod == "POST",
+                   String(decoding:HTTPStub.body(request),as:UTF8.self).contains("20F") { displayed.fulfill() }
+                return (200,Data())
+            }
+        }
+        app.applyWeatherLocation("Fixture City")
+        await eventually { app.weatherLocationLabel == "Fixture City" }
+        XCTAssertEqual(defaults.double(forKey:"weatherLat"),1)
+        app.showWeather=true
+        await fulfillment(of:[displayed],timeout:2)
+        XCTAssertEqual(app.latestWeather?.tempText,"20F")
+        app.weatherCelsius=true
+        await eventually { app.latestWeather?.unit == "C" }
+        app.showWeather=false
+        XCTAssertNil(app.latestWeather)
+        app.applyWeatherLocation("")
+        XCTAssertEqual(app.weatherLocationLabel,"Automatic (IP-based)")
+        HTTPStub.handler={ _ in (200,Data("{}".utf8)) }
+        app.lastError=nil; app.applyWeatherLocation("Missing City")
+        await eventually { app.lastError != nil }
+        XCTAssertTrue(app.lastError!.contains("Could not find"))
+        // Let the canceled widget task and expiration request finish before the fixture is removed.
+        try? await Task.sleep(for:.milliseconds(20))
+    }
+
+    @MainActor func testPingWidgetAndPauseResumePreservePreferences() async throws {
+        let app=state()
+        app.pingHost="127.0.0.1"
+        HTTPStub.handler={ _ in (200,Data()) }
+        app.showPing=true
+        await eventually { app.latestPingMs != nil }
+        let fixture=try JSONDecoder().decode(DeviceApp.self,from:Data(appFixture.utf8))
+        try await app.launchDeviceApp(fixture,on:app.client)
+        XCTAssertTrue(app.widgetsPausedForApp); XCTAssertTrue(app.showPing)
+        XCTAssertTrue(defaults.bool(forKey:"showPing"))
+        app.resumeWidgets()
+        await eventually { app.latestPingMs != nil }
+        XCTAssertFalse(app.widgetsPausedForApp)
+        app.showPing=false
+        XCTAssertNil(app.latestPingMs)
+        try? await Task.sleep(for:.milliseconds(20))
+    }
+
     @MainActor func testDeviceAppDisplayHandoffAndFailedLaunchRestoresWidgets() async throws {
         let app = state()
         let fixture = try JSONDecoder().decode(DeviceApp.self,from:Data(appFixture.utf8))
@@ -214,13 +307,16 @@ final class AppStateTests: XCTestCase {
         }
         let model = DeviceAppsModel(client:app.client,
             launchAction:{ client, deviceApp in try await app.launchDeviceApp(deviceApp,on:client) },
-            stopAction:{ app.resumeWidgets() })
+            stopAction:{ app.resumeWidgets() },removeAction:{ app.deviceAppRemoved($0) })
         await model.launch(fixture)
         XCTAssertNil(model.error); XCTAssertTrue(app.widgetsPausedForApp)
         XCTAssertEqual(requests,["DELETE /api/display/draw","POST /api/apps/launch"])
         await model.stop()
         XCTAssertFalse(app.widgetsPausedForApp)
         XCTAssertEqual(requests.last,"POST /api/apps/quit")
+        await model.launch(fixture)
+        await model.remove(fixture)
+        XCTAssertFalse(app.widgetsPausedForApp,"Removing the app should resume widgets")
         HTTPStub.handler = { _ in (500,Data()) }
         await model.launch(fixture)
         XCTAssertFalse(app.widgetsPausedForApp); XCTAssertNotNil(model.error)

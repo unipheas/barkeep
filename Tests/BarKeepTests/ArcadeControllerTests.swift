@@ -45,18 +45,22 @@ final class ArcadeControllerTests: XCTestCase {
         let client=BusyBarClient(host:"first.test",session:HTTPStub.session())
         let controller=ArcadeController(client:client,keyboard:keyboard)
         let started=expectation(description:"Frame upload started")
+        let release=DispatchSemaphore(value:0)
+        defer { release.signal() }
         var requests: [URLRequest]=[]
         HTTPStub.handler = { request in
             requests.append(request)
             started.fulfill()
-            Thread.sleep(forTimeInterval:0.15)
+            _ = release.wait(timeout:.now()+10)
             return (200,Data())
         }
         controller.start(.snake)
-        await fulfillment(of:[started],timeout:1)
-        try? await Task.sleep(for:.milliseconds(80))
+        await fulfillment(of:[started],timeout:3)
+        await settle(seconds:3) { controller.framesDropped > 0 }
         XCTAssertGreaterThan(controller.framesDropped,0)
         client.host="second.test"
+        controller.stop()
+        release.signal()
         await controller.stopAndWait()
         XCTAssertEqual(requests.count,1)
         XCTAssertEqual(requests[0].url?.host,"first.test")

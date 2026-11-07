@@ -102,12 +102,15 @@ final class DeviceAppsModel {
     private let liveClient: BusyBarClient
     private let launchAction: ((BusyBarClient, DeviceApp) async throws -> Void)?
     private let stopAction: (() -> Void)?
+    private let removeAction: ((DeviceApp) -> Void)?
 
     init(client: BusyBarClient,
          launchAction: ((BusyBarClient, DeviceApp) async throws -> Void)? = nil,
-         stopAction: (() -> Void)? = nil) {
+         stopAction: (() -> Void)? = nil,
+         removeAction: ((DeviceApp) -> Void)? = nil) {
         self.liveClient = client; self.client = client.snapshot()
         self.launchAction = launchAction; self.stopAction = stopAction
+        self.removeAction = removeAction
     }
 
     func refresh() async {
@@ -167,6 +170,7 @@ final class DeviceAppsModel {
     func remove(_ app: DeviceApp) async {
         await perform {
             try await self.client.removeApp(id: app.id)
+            self.removeAction?(app)
             self.apps.removeAll { $0.id == app.id }
             if self.settingsApp?.id == app.id { self.closeSettings() }
             self.message = "Removed \(app.name). Its settings are preserved on the bar."

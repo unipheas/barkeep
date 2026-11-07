@@ -30,8 +30,8 @@ struct UpdateStatus: Decodable {
 struct ScreenFrame {
     let width: Int
     let height: Int
-    /// Raw pixel bytes in GRB order, row-major.
-    let grbPixels: Data
+    /// Raw pixel bytes in BGR order, row-major.
+    let bgrPixels: Data
 }
 
 struct BusyBarSettings: Codable {
@@ -46,14 +46,21 @@ enum TextFont: String, CaseIterable, Identifiable {
 }
 
 final class BusyBarClient: @unchecked Sendable {
-    var host: String
-    var token: String
+    private let configurationLock = NSLock()
+    private var configuration: (host: String, token: String)
+    var host: String {
+        get { configurationLock.withLock { configuration.host } }
+        set { configurationLock.withLock { configuration.host = Self.normalizedHost(newValue) } }
+    }
+    var token: String {
+        get { configurationLock.withLock { configuration.token } }
+        set { configurationLock.withLock { configuration.token = newValue } }
+    }
 
     private let session: URLSession
 
     init(host: String, token: String = "", session: URLSession? = nil) {
-        self.host = Self.normalizedHost(host)
-        self.token = token
+        self.configuration = (Self.normalizedHost(host), token)
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 6
         config.timeoutIntervalForResource = 180
@@ -62,8 +69,12 @@ final class BusyBarClient: @unchecked Sendable {
 
     /// Pin multi-request operations to their starting device and credentials.
     func snapshot() -> BusyBarClient {
-        BusyBarClient(host: host, token: token, session: session)
+        let endpoint = configurationLock.withLock { configuration }
+        return BusyBarClient(host: endpoint.host, token: endpoint.token, session: session)
+    }
 
+    func configure(host: String, token: String) {
+        configurationLock.withLock { configuration = (Self.normalizedHost(host), token) }
     }
 
     func statusSocket() throws -> StatusSocket {
@@ -75,6 +86,7 @@ final class BusyBarClient: @unchecked Sendable {
     }
 
     func request(_ method: String, _ path: String, query: [String: String] = [:], body: Data? = nil, contentType: String = "application/json") throws -> URLRequest {
+        let (host, token) = configurationLock.withLock { configuration }
         guard path.hasPrefix("/"), !path.hasPrefix("//"), !path.contains(".."), !path.contains("?"), !path.contains("#"), !path.contains("://") else {
             throw BusyBarError(message: "Invalid local API path")
         }
@@ -415,19 +427,30 @@ final class BusyBarClient: @unchecked Sendable {
 
     // MARK: - Screen preview
 
-    /// Returns one frame of the given display (0 = front, 1 = back) as raw
-    /// GRB pixel data (base64 on the wire).
+    /// Returns BGR pixels. The rear display's packed L4 grayscale is expanded
+    /// to the same format as the front display for callers.
     func screenFrame(display: Int = 0) async throws -> ScreenFrame {
+        guard display == 0 || display == 1 else {
+            throw BusyBarError(message: "Display must be 0 (front) or 1 (back)")
+        }
         let data = try await send(request("GET", "/screen", query: ["display": String(display)]))
         guard let pixels = Data(base64Encoded: data) else {
             throw BusyBarError(message: "Screen frame was not base64")
         }
         let width = display == 0 ? Self.displayWidth : 160
         let height = display == 0 ? Self.displayHeight : 80
-        guard pixels.count >= width * height * 3 else {
+        let expectedBytes = display == 0 ? width * height * 3 : width * height / 2
+        guard pixels.count >= expectedBytes else {
             throw BusyBarError(message: "Screen frame too small (\(pixels.count) bytes)")
         }
-        return ScreenFrame(width: width, height: height, grbPixels: pixels)
+        if display == 0 { return ScreenFrame(width: width, height: height, bgrPixels: pixels) }
+        var expanded = Data(capacity: width * height * 3)
+        for byte in pixels.prefix(expectedBytes) {
+            for gray in [(byte & 0x0f) * 17, (byte >> 4) * 17] {
+                expanded.append(contentsOf: [gray, gray, gray])
+            }
+        }
+        return ScreenFrame(width: width, height: height, bgrPixels: expanded)
     }
 
     // MARK: - Device settings

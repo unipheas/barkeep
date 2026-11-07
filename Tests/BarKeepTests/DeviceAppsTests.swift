@@ -126,6 +126,44 @@ final class DeviceAppsTests: XCTestCase {
         XCTAssertThrowsError(try nameEndpoint.prepare(values:[:],json:"invalid",file:nil))
     }
 
+    @MainActor func testPackageLimitAndDeviceChangeDuringStage() async throws {
+        let model = DeviceAppsModel(client:client)
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString+".tgz")
+        try Data([1]).write(to:file)
+        defer { try? FileManager.default.removeItem(at:file) }
+        let handle = try FileHandle(forWritingTo:file)
+        try handle.truncate(atOffset:64*1024*1024+1); try handle.close()
+        await model.stage(url:file)
+        XCTAssertTrue(model.error!.contains("64 MB"))
+        try Data([1]).write(to:file)
+        let started = expectation(description:"Stage in flight")
+        HTTPStub.handler = { _ in
+            started.fulfill(); Thread.sleep(forTimeInterval:0.05)
+            return (200,Data("{\"install_key\":1,\"staged\":\(appFixture)}".utf8))
+        }
+        let task=Task { await model.stage(url:file) }
+        await fulfillment(of:[started],timeout:1)
+        await model.refresh()
+        client.token="changed"
+        await task.value
+        XCTAssertNil(model.staged)
+        XCTAssertTrue(model.error!.contains("Device changed during upload"))
+    }
+
+    func testAppsSortNaturallyAndTransportFallbacks() async throws {
+        let two = appFixture.replacingOccurrences(of:"Clock",with:"App 2")
+        let ten = appFixture.replacingOccurrences(of:"Clock",with:"App 10")
+        HTTPStub.handler = { _ in (200,Data("{\"apps\":[\(ten),\(two)]}".utf8)) }
+        let apps = try await client.apps()
+        XCTAssertEqual(apps.map(\.name),["App 2","App 10"])
+        HTTPStub.handler = { _ in (200,Data("{}".utf8)) }
+        let transport = try await client.transport(); XCTAssertEqual(transport,"unknown")
+        HTTPStub.handler = { _ in (500,Data([0xFF])) }
+        do { _ = try await client.status(); XCTFail("Expected failure") }
+        catch { XCTAssertTrue(error.localizedDescription.contains("HTTP 500")) }
+        let socket = try client.statusSocket(); socket.close()
+    }
+
     func testCatalogCoversFirmwareAndValidatesRequests() throws {
         XCTAssertEqual(DeviceEndpoint.all.count, 81)
         XCTAssertEqual(Set(DeviceEndpoint.all.map(\.id)).count, 81)
