@@ -182,10 +182,15 @@ final class SceneAcceptanceTests: XCTestCase {
         cancel.click()
         upload.click()
         app.typeKey("g", modifierFlags: [.command, .shift])
-        app.typeText(artifacts + "/fixture.tgz")
-        app.typeKey(.return, modifierFlags: [])
+        let pathField = app.textFields["PathTextField"]
+        XCTAssertTrue(pathField.waitForExistence(timeout: 5))
+        pathField.click()
+        pathField.typeKey("a", modifierFlags: .command)
+        pathField.typeText(artifacts + "/fixture.tgz")
+        pathField.typeKey(.return, modifierFlags: [])
         let open = app.buttons["Open"].firstMatch
-        XCTAssertTrue(open.waitForExistence(timeout: 5))
+        expectation(for: NSPredicate(format: "exists == true AND enabled == true"), evaluatedWith: open)
+        waitForExpectations(timeout: 5)
         open.click()
         XCTAssertTrue(controls.staticTexts["Acceptance Clock · 1.0.0"].waitForExistence(timeout: 5))
         controls.buttons["Cancel"].click() // Cancel staging; never install.
@@ -235,6 +240,17 @@ final class SceneAcceptanceTests: XCTestCase {
         XCTAssertEqual(weatherCity(), "", "Submit must remove the pinned city from isolated app preferences")
         let tools = controls.buttons["All Device Controls…"]
         XCTAssertTrue(tools.waitForExistence(timeout: 5))
+        // On macOS 15 the Settings content exceeds its viewport. Existence
+        // does not imply visibility, and click() does not reliably reveal it.
+        let settingsScroll = controls.scrollViews.firstMatch
+        XCTAssertTrue(settingsScroll.exists)
+        for _ in 0..<8 {
+            if settingsScroll.frame.contains(tools.frame) && tools.isHittable { break }
+            settingsScroll.scroll(byDeltaX: 0, deltaY: -100)
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        XCTAssertTrue(settingsScroll.frame.contains(tools.frame), "Device Controls must be inside the visible Settings viewport")
+        XCTAssertTrue(tools.isHittable)
         tools.click()
         XCTAssertTrue(app.windows["BarKeep Device Controls"].waitForExistence(timeout: 5))
         let toolsWindow = app.windows["BarKeep Device Controls"]
@@ -285,11 +301,14 @@ final class SceneAcceptanceTests: XCTestCase {
         XCTAssertTrue(toolsWindow.staticTexts["No file selected"].exists)
         choose.click()
         app.typeKey("g", modifierFlags: [.command, .shift])
-        app.typeText(artifacts + "/fixture.tgz")
-        app.typeKey(.return, modifierFlags: [])
+        XCTAssertTrue(pathField.waitForExistence(timeout: 5))
+        pathField.click()
+        pathField.typeKey("a", modifierFlags: .command)
+        pathField.typeText(artifacts + "/fixture.tgz")
+        pathField.typeKey(.return, modifierFlags: [])
         let chooseConfirm = app.buttons["Open"].firstMatch
-        XCTAssertTrue(chooseConfirm.waitForExistence(timeout: 5))
-        guard chooseConfirm.exists else { return }
+        expectation(for: NSPredicate(format: "exists == true AND enabled == true"), evaluatedWith: chooseConfirm)
+        waitForExpectations(timeout: 5)
         chooseConfirm.click()
         XCTAssertTrue(toolsWindow.staticTexts["fixture.tgz"].waitForExistence(timeout: 5))
         XCTAssertEqual(try requestRecords().filter { $0["path"] == "/api/assets/upload" }.count, uploadsBeforeSelection, "Choosing a file must not submit the API action")
