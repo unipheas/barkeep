@@ -10,6 +10,9 @@ permissions:
 jobs:
   verify:
     runs-on: macos-15
+    env:
+      # ViewInspector 0.10.5 references SDK 26 types; retain macOS 15 runtime testing.
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
       - name: Show runner and Swift toolchain

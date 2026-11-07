@@ -182,9 +182,9 @@ final class AppState {
 
     let client: BusyBarClient
     let arcade: ArcadeController
-    private let localNetworkPermissionTrigger = LocalNetworkPermissionTrigger()
-    private let micMonitor = MicMonitor()
-    private let notificationWatcher = NotificationWatcher()
+    private let localNetworkPermissionTrigger: LocalNetworkPermissionTrigger
+    private let micMonitor: MicMonitor
+    private let notificationWatcher: NotificationWatcher
     private let calendarMonitor: CalendarMonitor
     private let slackSync: SlackSync
     private var offDebounceTask: Task<Void, Never>?
@@ -207,12 +207,25 @@ final class AppState {
         ("mail", "#0078D4FF"),
     ]
 
-    init(defaults: UserDefaults = .standard, startServices: Bool = true, session: URLSession? = nil, slackSession: URLSession = .shared, weatherSession: URLSession = .shared, calendarSource: CalendarSource? = nil) {
+    init(
+        defaults: UserDefaults = .standard,
+        startServices: Bool = true,
+        session: URLSession? = nil,
+        slackSession: URLSession = .shared,
+        weatherSession: URLSession = .shared,
+        calendarSource: CalendarSource? = nil,
+        localNetworkPermissionTrigger: LocalNetworkPermissionTrigger? = nil,
+        micMonitor: MicMonitor? = nil,
+        notificationWatcher: NotificationWatcher? = nil
+    ) {
         let connection = DeviceConnection(defaults: defaults)
         self.connection = connection
         self.defaults = defaults
         self.weatherSession = weatherSession
         self.calendarMonitor = CalendarMonitor(source: calendarSource)
+        self.localNetworkPermissionTrigger = localNetworkPermissionTrigger ?? LocalNetworkPermissionTrigger()
+        self.micMonitor = micMonitor ?? MicMonitor()
+        self.notificationWatcher = notificationWatcher ?? NotificationWatcher()
         self.autoOnCall = defaults.object(forKey: "autoOnCall") as? Bool ?? true
         self.theme = defaults.string(forKey: "theme") ?? "on_air"
         self.triggerSmartHome = defaults.object(forKey: "triggerSmartHome") as? Bool ?? true
@@ -246,27 +259,27 @@ final class AppState {
         self.slackSync.token = self.slackToken
         calendarMonitor.onChange = { [weak self] in self?.calendarChanged() }
         guard startServices else { return }
-        localNetworkPermissionTrigger.onAccessAvailable = { [weak self] in
+        self.localNetworkPermissionTrigger.onAccessAvailable = { [weak self] in
             Task { @MainActor [weak self] in
                 await self?.refreshDeviceStatus()
             }
         }
-        localNetworkPermissionTrigger.requestAccess()
+        self.localNetworkPermissionTrigger.requestAccess()
         syncPingLoop()
         syncWeatherLoop()
 
-        micMonitor.onChange = { [weak self] activity in
+        self.micMonitor.onChange = { [weak self] activity in
             Task { @MainActor in self?.micStateChanged(activity) }
         }
-        micMonitor.start()
+        self.micMonitor.start()
 
-        notificationWatcher.onNotification = { [weak self] note in
+        self.notificationWatcher.onNotification = { [weak self] note in
             Task { @MainActor [weak self] in self?.handleNotification(note) }
         }
-        notificationWatcher.onStatusChange = { [weak self] status in
+        self.notificationWatcher.onStatusChange = { [weak self] status in
             Task { @MainActor [weak self] in self?.notificationStatus = status }
         }
-        if forwardNotifications { notificationWatcher.start() }
+        if forwardNotifications { self.notificationWatcher.start() }
 
         if calendarAutoBusy { calendarMonitor.start() }
 

@@ -25,17 +25,29 @@ final class LiveDeviceTests: XCTestCase {
             XCTAssertTrue(installed.contains { $0.id == "app.barkeep.qa" })
             let initial = try await client.appSettings(id:"app.barkeep.qa")
             XCTAssertTrue(initial.contains("QA OK"))
-            try await client.saveAppSettings(id:"app.barkeep.qa",json:#"{"version":1,"values":{"label":"Saved"}}"#)
+            let edited = try AppSettingsDocument.replacing(in:initial,at:["label"],value:"Saved")
+            try await client.saveAppSettings(id:"app.barkeep.qa",json:edited)
             let saved = try await client.appSettings(id:"app.barkeep.qa")
             XCTAssertTrue(saved.contains("Saved"))
             try await client.resetAppSettings(id:"app.barkeep.qa")
             let reset = try await client.appSettings(id:"app.barkeep.qa")
             XCTAssertTrue(reset.contains("QA OK"))
+            // Match the native app handoff: its higher-priority overlay must not hide JS output.
+            try await client.clearDisplay()
             try await client.launchApp(id:"app.barkeep.qa")
+            // The launch response precedes JS parsing. Ignore the launcher splash frame.
             try await Task.sleep(for:.seconds(2))
-            let frame = try await client.screenFrame()
-            XCTAssertTrue(frame.bgrPixels.contains { $0 != 0 },"Running app should draw visible pixels")
+            var visible = false
+            for _ in 0..<40 {
+                let frame = try await client.screenFrame()
+                if frame.bgrPixels.contains(where: { $0 != 0 }) { visible = true; break }
+                try await Task.sleep(for:.milliseconds(250))
+            }
+            XCTAssertTrue(visible,"Running app should draw visible pixels within 10 seconds")
             try await client.quitApp()
+            // Firmware acknowledges stop before the runner releases its script file.
+            // This hardware check models the normal UI pause between Stop and Remove.
+            try await Task.sleep(for:.seconds(1))
             try await client.removeApp(id:"app.barkeep.qa")
         } catch {
             try? await client.quitApp()

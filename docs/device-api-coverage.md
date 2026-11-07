@@ -102,3 +102,14 @@ dependency; these tests inspect observable and binding-backed actions. They do
 not replace live testing of SwiftUI-owned state, system dialogs or AppKit focus.
 Local-network permission lifecycle tests use a fake browser to check duplicate
 requests, failure/cancellation cleanup and callbacks from an obsolete probe.
+
+A rapid automated launch/stop/remove sequence exposed a firmware 1.3.1 race:
+`/apps/quit` acknowledges before the JS runner has released its script file.
+Immediate removal can return HTTP 508 after deleting the manifest, leaving the
+app absent from the list but a script file on disk. The native app now refreshes
+its list on removal failure and retains the error; it does not report success or
+silently delete arbitrary storage. An already-stopped app (HTTP 409) still resumes
+BarKeep widgets. Tests cover both responses. The hardware lifecycle test ignores
+the launcher splash and allows a one-second shutdown interval between Stop and
+Remove; this passed on the connected device. The temporary QA residue from the
+failed run was removed explicitly, and the original three apps remained intact.

@@ -114,14 +114,14 @@ final class DeviceAppsModel {
     }
 
     func refresh() async {
-        await perform {
+        await perform(unsupportedOnNotFound: true) {
             self.apps = try await self.client.apps()
             self.loaded = true
         }
     }
 
     func stage(url: URL) async {
-        await perform {
+        await perform(unsupportedOnNotFound: true) {
             self.staged = nil
             guard ["tgz", "tar", "gz"].contains(url.pathExtension.lowercased()) else {
                 throw BusyBarError(message: "Choose a Busy Bar app package (.tgz or .tar).")
@@ -161,15 +161,34 @@ final class DeviceAppsModel {
 
     func stop() async {
         await perform {
-            try await self.client.quitApp()
+            do {
+                try await self.client.quitApp()
+                self.message = "App stopped."
+            } catch let error as BusyBarError where error.statusCode == 409 {
+                // The firmware reports 409 when the app has already exited.
+                self.message = "App already stopped."
+            }
             self.stopAction?()
-            self.message = "App stopped."
         }
     }
 
     func remove(_ app: DeviceApp) async {
         await perform {
-            try await self.client.removeApp(id: app.id)
+            do {
+                try await self.client.removeApp(id: app.id)
+            } catch {
+                // Firmware can remove the registry entry and then fail filesystem cleanup.
+                // Reconcile the list while preserving the actual failure for the user.
+                if let apps = try? await self.client.apps() {
+                    self.apps = apps
+                    if !apps.contains(where: { $0.id == app.id }) {
+                        self.message = "\(app.name) no longer appears in the app list, but the device may have left files behind."
+                        self.removeAction?(app)
+                        if self.settingsApp?.id == app.id { self.closeSettings() }
+                    }
+                }
+                throw error
+            }
             self.removeAction?(app)
             self.apps.removeAll { $0.id == app.id }
             if self.settingsApp?.id == app.id { self.closeSettings() }
@@ -215,7 +234,7 @@ final class DeviceAppsModel {
         }
     }
 
-    private func perform(_ operation: () async throws -> Void) async {
+    private func perform(unsupportedOnNotFound: Bool = false, _ operation: () async throws -> Void) async {
         guard !working else { return }
         working = true; error = nil; message = nil
         defer { working = false }
@@ -227,7 +246,7 @@ final class DeviceAppsModel {
             try await operation()
         }
         catch {
-            if let apiError = error as? BusyBarError, apiError.statusCode == 404 {
+            if unsupportedOnNotFound, let apiError = error as? BusyBarError, apiError.statusCode == 404 {
                 self.error = "JS apps need Busy Bar firmware 1.3.1 or later. Check for a firmware update in Settings."
             } else { self.error = error.localizedDescription }
         }

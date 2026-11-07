@@ -32,6 +32,43 @@ final class AppStateTests: XCTestCase {
         XCTFail("State did not settle",file:file,line:line)
     }
 
+    @MainActor func testStartupWiresPermissionsMicrophoneNotificationsAndCalendar() async throws {
+        defaults.set(true,forKey:"forwardNotifications")
+        defaults.set(true,forKey:"calendarAutoBusy")
+        defaults.set(0.0,forKey:"offDebounceSeconds")
+        let browser=FixtureNetworkBrowser()
+        let permission=LocalNetworkPermissionTrigger(makeBrowser:{browser})
+        let microphone=MicMonitor(hardware:AudioHardwareCalls(
+            size:{ _,_,size in size=0; return 0 },
+            read:{ _,_,_,_ in 0 },add:{ _,_,_,_ in 0 },remove:{ _,_,_,_ in 0 }))
+        let watcher=NotificationWatcher(paths:[])
+        let calendar=AppCalendarFixture()
+        let app=AppState(defaults:defaults,session:HTTPStub.session(),calendarSource:calendar,
+                         localNetworkPermissionTrigger:permission,micMonitor:microphone,notificationWatcher:watcher)
+        defer { microphone.stop(); app.forwardNotifications=false; app.calendarAutoBusy=false }
+        await eventually { app.deviceReachable && app.notificationStatus == .noAccess }
+        XCTAssertEqual(browser.starts,1)
+        XCTAssertTrue(app.calendarAccessGranted)
+        browser.stateUpdateHandler?(.ready)
+        await eventually { browser.cancels == 1 && !app.isConnecting }
+        microphone.onChange?(.init(isInUse:true,deviceNames:["Fixture Teams microphone"]))
+        await eventually { app.onCall && app.micInUse }
+        XCTAssertEqual(app.activeMicrophoneNames,["Fixture Teams microphone"])
+        microphone.onChange?(.init(isInUse:false,deviceNames:[]))
+        await eventually { !app.onCall && !app.micInUse }
+        let delivered=expectation(description:"Watcher callback reaches device")
+        HTTPStub.handler={ request in
+            if request.url!.path == "/api/display/draw" {
+                XCTAssertTrue(String(decoding:HTTPStub.body(request),as:UTF8.self).contains("Fixture notification"))
+                delivered.fulfill()
+            }
+            return (200,Data("{}".utf8))
+        }
+        watcher.onNotification?(.init(bundleID:"com.microsoft.teams2",title:"Fixture notification",body:""))
+        await fulfillment(of:[delivered],timeout:2)
+        await eventually { app.lastError == nil }
+    }
+
     @MainActor func testCalendarBusyCountdownAndDisableLifecycle() async throws {
         let source = AppCalendarFixture()
         let now = Date()

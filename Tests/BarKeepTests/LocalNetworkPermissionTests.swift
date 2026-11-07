@@ -54,7 +54,7 @@ final class LocalNetworkPermissionTests: XCTestCase {
     }
 }
 
-private final class FixtureNetworkBrowser: LocalNetworkBrowser {
+final class FixtureNetworkBrowser: LocalNetworkBrowser {
     var stateUpdateHandler: (@Sendable (NWBrowser.State) -> Void)?
     var starts=0
     var cancels=0

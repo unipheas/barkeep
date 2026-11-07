@@ -53,6 +53,10 @@ password prompt and explicit keychain location.
 
 ## Build and verify each release
 
+Use Xcode 26 or newer for the test-only ViewInspector dependency. CI explicitly
+selects Xcode 26.3 on the macOS 15 runner; the app deployment target remains
+macOS 14.
+
 Start from the merged, passing main commit, preserve local edits, and verify
 that the intended version/tag/release does not already exist. Use the version in `packaging/Info.plist` and verify it matches the intended release.
 

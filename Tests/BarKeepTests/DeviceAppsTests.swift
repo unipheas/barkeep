@@ -41,6 +41,36 @@ final class DeviceAppsTests: XCTestCase {
         for index in [3,5,6,7,8] { XCTAssertTrue(requests[index].url!.query!.contains("app_id=app.test.clock")) }
     }
 
+    @MainActor func testAlreadyStoppedAppResumesWidgetsAndPartialRemovalRefreshesList() async throws {
+        var stops=0, removals=0, removed=false
+        let app=try JSONDecoder().decode(DeviceApp.self,from:Data(appFixture.utf8))
+        HTTPStub.handler={ request in
+            switch (request.httpMethod!,request.url!.path) {
+            case (_,"/api/apps/quit"): return (409,Data(#"{"error":"application is not running"}"#.utf8))
+            case ("DELETE","/api/apps"):
+                removed=true
+                return (508,Data(#"{"error":"Filesystem error"}"#.utf8))
+            case (_,"/api/apps/list"):
+                return (200,Data("{\"apps\":\(removed ? "[]" : "[" + appFixture + "]")}".utf8))
+            case (_,"/api/apps/settings"): return (200,Data(#"{"version":1,"values":{}}"#.utf8))
+            default: return (404,Data())
+            }
+        }
+        let model=DeviceAppsModel(client:client,stopAction:{stops += 1},removeAction:{ _ in removals += 1 })
+        await model.refresh()
+        await model.loadSettings(app)
+        XCTAssertNotNil(model.settingsApp)
+        await model.stop()
+        XCTAssertNil(model.error); XCTAssertEqual(model.message,"App already stopped.")
+        XCTAssertEqual(stops,1)
+        await model.remove(app)
+        XCTAssertTrue(model.apps.isEmpty)
+        XCTAssertNil(model.settingsApp)
+        XCTAssertEqual(removals,1)
+        XCTAssertTrue(model.message?.contains("left files behind") == true)
+        XCTAssertTrue(model.error?.contains("508") == true,"A partial removal must retain the firmware error")
+    }
+
     func testInvalidInputNeverReachesDevice() async {
         HTTPStub.handler = { _ in XCTFail("Invalid input reached network"); return (200, Data()) }
         for id in ["", ".hidden", "../test", "app/a", String(repeating: "a", count: 33), "a&b", "🙂"] {
@@ -100,6 +130,9 @@ final class DeviceAppsTests: XCTestCase {
         client.host = "bar.test"
         HTTPStub.handler = { _ in (404, Data()) }
         await model.refresh(); XCTAssertTrue(model.error!.contains("1.3.1")); XCTAssertFalse(model.working)
+        await model.launch(app)
+        XCTAssertTrue(model.error!.contains("404"))
+        XCTAssertFalse(model.error!.contains("1.3.1"),"A missing app is not evidence of old firmware")
     }
 
     func testRequestIsolationAndInvalidTransportResponses() async throws {
