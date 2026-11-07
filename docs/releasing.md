@@ -61,8 +61,7 @@ Start from the merged, passing main commit, preserve local edits, and verify
 that the intended version/tag/release does not already exist. Use the version in `packaging/Info.plist` and verify it matches the intended release.
 
 ```sh
-swift test --enable-code-coverage
-python3 scripts/check-coverage.py "$(swift test --show-codecov-path)" --minimum 100
+python3 scripts/test-full-coverage.py --with-login-item-test
 python3 -m coverage run --source=mcp,hooks -m unittest discover -s Tests/Python
 python3 -m coverage report --fail-under=100
 swift build -c release

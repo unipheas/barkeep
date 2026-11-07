@@ -33,7 +33,8 @@ final class PlatformBoundaryFailureTests: XCTestCase {
         event.startDate = now.addingTimeInterval(-60)
         event.endDate = now.addingTimeInterval(60)
         source.items = [event]
-        let monitor = CalendarMonitor(source: source, center: NotificationCenter(), now: { now }, identifier: { _ in nil })
+        var missingTitle = true
+        let monitor = CalendarMonitor(source: source, center: NotificationCenter(), now: { now }, metadata: { (nil, missingTitle ? nil : $0.title) })
         var changes = 0
         monitor.onChange = { changes += 1 }
         monitor.start()
@@ -41,6 +42,7 @@ final class PlatformBoundaryFailureTests: XCTestCase {
         XCTAssertEqual(changes, 1)
         monitor.refresh()
         XCTAssertEqual(changes, 1)
+        missingTitle = false
         event.title = "Changed"
         monitor.refresh()
         XCTAssertEqual(changes, 2)

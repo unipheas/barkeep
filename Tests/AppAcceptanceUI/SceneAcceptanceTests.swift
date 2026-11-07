@@ -95,6 +95,41 @@ final class SceneAcceptanceTests: XCTestCase {
             Thread.sleep(forTimeInterval: 0.1)
         }
         XCTAssertTrue(try String(contentsOf: log).contains("GET /api/status"))
+        controls.descendants(matching: .any).matching(identifier: "Settings").firstMatch.click()
+        controls.buttons["All Device Controls…"].click()
+        let tools = app.windows["BarKeep Device Controls"]
+        XCTAssertTrue(tools.waitForExistence(timeout: 5))
+        guard tools.exists else { return }
+        let search = tools.textFields["Find a device control"]
+        search.click()
+        search.typeText("/status/ws")
+        let endpoint = tools.staticTexts["GET /status/ws"].firstMatch
+        XCTAssertTrue(endpoint.waitForExistence(timeout: 5))
+        guard endpoint.exists else { return }
+        endpoint.click()
+        tools.buttons["Start Stream"].click()
+        XCTAssertTrue(tools.staticTexts["1 packets"].waitForExistence(timeout: 5))
+        let save = tools.buttons["Save Latest Packet…"]
+        XCTAssertTrue(save.isEnabled)
+        guard save.isEnabled else { return }
+        save.click()
+        app.typeKey("g", modifierFlags: [.command, .shift])
+        app.typeText(artifacts)
+        app.typeKey(.return, modifierFlags: [])
+        let confirm = app.buttons["Save"].firstMatch
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        guard confirm.exists else { return }
+        confirm.click()
+        let saved = URL(fileURLWithPath: artifacts + "/busy-bar-status.json")
+        defer { try? FileManager.default.removeItem(at: saved) }
+        for _ in 0..<50 {
+            if FileManager.default.fileExists(atPath: saved.path) { break }
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        let expected = try JSONSerialization.data(withJSONObject: ["timestamp": 42], options: [.prettyPrinted, .sortedKeys])
+        XCTAssertEqual(try Data(contentsOf: saved), expected)
+        tools.buttons["Stop Stream"].click()
+        XCTAssertTrue(tools.buttons["Start Stream"].waitForExistence(timeout: 5))
         controls.buttons["Quit BarKeep"].click()
         XCTAssertTrue(app.wait(for: .notRunning, timeout: 5))
     }

@@ -30,7 +30,7 @@ final class DeviceStatusSocketTests: XCTestCase {
         do { _ = try await socket.receive(); XCTFail("Accepted text instead of a binary packet") }
         catch { XCTAssertEqual(error.localizedDescription, "Expected a binary status packet from the bar.") }
         socket.close()
-        XCTAssertTrue(task.state == .canceling || task.state == .completed)
+        // Observe closure at the peer; Foundation task.state updates asynchronously.
         let result = output.fileHandleForReading.readDataToEndOfFile()
         server.waitUntilExit()
         XCTAssertEqual(server.terminationStatus, 0)

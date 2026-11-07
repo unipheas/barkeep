@@ -93,8 +93,13 @@ notifications. Unlike fixture mode, Bonjour is not mocked and may prompt for
 local network consent. No UI interruption handler approves permissions; an
 unexpected prompt is a blocker, not a reason to broaden permissions.
 
-The XCUITest requires real controls, a status request received by the loopback
-server, normal Quit, and a flushed nonempty app-process coverage profile. The
+The XCUITest requires real controls and a status request received by the loopback
+server. It also opens Live Device Status, enables a real URLSession WebSocket
+against that same loopback server, receives a valid timestamp protobuf packet,
+saves it through the default native exporter, checks exact JSON bytes in its
+temporary directory, stops the stream, and quits normally. The bounded fixture
+checks the enable message and stream close; no remote socket is used. The app
+must flush a nonempty process coverage profile. The
 normal-factory proof passed on Nova without any permission prompt. Its profile
 showed execution of the real `return AppState()` factory line. Final coverage
 must still use frozen identical source and export against the normal unit-test

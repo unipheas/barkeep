@@ -19,10 +19,16 @@ jobs:
           sw_vers
           xcodebuild -version
           swift --version
-      - name: Test
-        run: swift test --enable-code-coverage
-      - name: Report Swift coverage
-        run: python3 scripts/check-coverage.py "$(swift test --show-codecov-path)"
+      - name: Install acceptance project generator
+        run: brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
+      - name: Enforce complete Swift coverage and app acceptance
+        run: python3 scripts/test-full-coverage.py --with-login-item-test
+      - name: Preserve Swift coverage and acceptance diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: swift-coverage-and-acceptance
+          path: coverage-artifacts/
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

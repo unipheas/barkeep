@@ -2,6 +2,8 @@
 """Build and launch the real app with isolated external-service fixtures."""
 import json
 import hashlib
+import base64
+import struct
 import os
 from pathlib import Path
 import shutil
@@ -55,9 +57,63 @@ if login:
 server = None
 if normal:
     class FixtureHandler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
         def log_message(self, *args):
             pass
+        def websocket(self):
+            self.close_connection = True
+            self.connection.settimeout(60)
+            evidence = {'enabled': False, 'packetSent': False, 'closed': False}
+            try:
+                key = self.headers.get('Sec-WebSocket-Key', '')
+                if self.headers.get('Upgrade', '').lower() != 'websocket' or not key:
+                    self.send_error(400)
+                    return
+                accept = base64.b64encode(hashlib.sha1((key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').encode()).digest()).decode()
+                self.send_response(101)
+                self.send_header('Upgrade', 'websocket')
+                self.send_header('Connection', 'Upgrade')
+                self.send_header('Sec-WebSocket-Accept', accept)
+                self.end_headers()
+                self.wfile.flush()
+                def exact(length, allow_eof=False):
+                    data = self.rfile.read(length)
+                    if allow_eof and not data: return None
+                    if len(data) != length: raise RuntimeError('Truncated fixture frame')
+                    return data
+                def frame():
+                    header = exact(2, allow_eof=True)
+                    if header is None: return None, b''
+                    first, second = header
+                    if not first & 128: raise RuntimeError('Fragmented fixture frame')
+                    length = second & 127
+                    if length == 126: length = struct.unpack('!H', exact(2))[0]
+                    elif length == 127: length = struct.unpack('!Q', exact(8))[0]
+                    if length > 16384: raise RuntimeError('Oversized fixture frame')
+                    if not second & 128: raise RuntimeError('Unmasked client frame')
+                    mask = exact(4)
+                    data = exact(length)
+                    return first & 15, bytes(value ^ mask[i % 4] for i, value in enumerate(data))
+                opcode, data = frame()
+                if opcode != 1 or json.loads(data) != {'enable': True}: raise RuntimeError('Invalid enable message')
+                evidence['enabled'] = True
+                packet = b'\x09' + struct.pack('<Q', 42)  # BSB_State.State.timestamp
+                self.wfile.write(bytes([0x82, len(packet)]) + packet)
+                self.wfile.flush()
+                evidence['packetSent'] = True
+                opcode, data = frame()
+                if opcode not in (None, 8): raise RuntimeError('Expected stream cancellation')
+                if opcode == 8 and (len(data) < 2 or struct.unpack('!H', data[:2])[0] != 1000):
+                    raise RuntimeError('Unexpected close code')
+                evidence['closed'] = True
+            except Exception as error:
+                evidence['error'] = str(error)
+            finally:
+                (work / 'normal-websocket.json').write_text(json.dumps(evidence))
         def reply(self):
+            if self.command == 'GET' and urlsplit(self.path).path == '/api/status/ws':
+                self.websocket()
+                return
             length = int(self.headers.get('Content-Length', 0))
             if length:
                 self.rfile.read(length)
@@ -135,8 +191,12 @@ if ui_mode:
             server.server_close()
             subprocess.run(['/usr/bin/defaults', 'delete', spec['targets']['BarKeepAcceptance']['settings']['base']['PRODUCT_BUNDLE_IDENTIFIER']], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         subprocess.run(['/usr/bin/defaults', 'delete', suite], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    if normal and not (work / 'normal-requests.log').exists():
-        raise SystemExit('Normal app did not reach the loopback fixture')
+    if normal:
+        if not (work / 'normal-requests.log').exists():
+            raise SystemExit('Normal app did not reach the loopback fixture')
+        websocket = json.loads((work / 'normal-websocket.json').read_text())
+        if websocket != {'enabled': True, 'packetSent': True, 'closed': True}:
+            raise SystemExit(f'Loopback WebSocket lifecycle failed: {websocket}')
     profiles = list(work.glob('ui-app-*.profraw'))
     if not profiles or not all(p.stat().st_size for p in profiles):
         raise SystemExit('UI test did not flush a nonempty app profile')

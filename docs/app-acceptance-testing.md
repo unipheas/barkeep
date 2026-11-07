@@ -49,3 +49,27 @@ runs, simulated hardware, or unknown platform outcomes must be reported as such.
 A successful unit run alone does not prove app-level acceptance or satisfy a
 whole-source release coverage gate. The release must remain blocked when the
 requested gate or any required acceptance/cleanup verification fails.
+
+## Reproducible gate wrapper
+
+Run `python3 scripts/test-full-coverage.py --with-login-item-test` after approval
+for the isolated Login Items test. Without that explicit flag the wrapper skips
+Login Items, but still enforces the unchanged exact 100% threshold. It never
+weakens the gate to accommodate a skipped test.
+
+Each invocation creates a fresh `coverage-artifacts/run-*` directory. The wrapper
+preserves the successful unit profile and ordinary XCTest executable before
+acceptance builds, checks the production-source digest throughout, and merges
+only successful, matching-source profiles. The executable is discovered from the
+debug directory derived from `swift test --show-codecov-path`, supporting both
+BarKeepPackageTests and BarKeepTests. Only that executable is exported.
+
+The manifest, command stdout/stderr, profiles, acceptance logs and xcresult
+bundles are retained, including on failure. Acceptance build products remain in
+the original temporary directory printed in the logs; they are not duplicated.
+Both CI workflows upload diagnostics even after a failing gate. They install
+XcodeGen through Homebrew on the ephemeral runner and explicitly opt into the
+isolated Login Items test. A hosted runner may lack a usable interactive session
+or existing UI automation authorization. Such a failure blocks the workflow;
+it is not permission to grant access, change security settings, skip a required
+mode, or claim platform coverage from injected boundary-contract tests.
