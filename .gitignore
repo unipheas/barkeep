@@ -14,3 +14,7 @@ PUBLISHING.md
 *.p12
 *.pem
 *.mobileprovision
+__pycache__/
+.coverage
+.coverage.*
+coverage/

@@ -19,4 +19,8 @@ jobs:
           xcodebuild -version
           swift --version
       - name: Test
-        run: swift test
+        run: swift test --enable-code-coverage
+      - name: Enforce complete Swift coverage for production release
+        run: python3 scripts/check-coverage.py "$(swift test --show-codecov-path)" --minimum 100
+      - name: Test agent tools
+        run: python3 -m unittest discover -s Tests/Python

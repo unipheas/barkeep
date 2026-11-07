@@ -17,7 +17,22 @@ jobs:
           xcodebuild -version
           swift --version
       - name: Test
-        run: swift test
+        run: swift test --enable-code-coverage
+      - name: Report Swift coverage
+        run: python3 scripts/check-coverage.py "$(swift test --show-codecov-path)"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Test agent tools and CLI
+        run: |
+          python3 -m venv /tmp/barkeep-test-env
+          /tmp/barkeep-test-env/bin/pip install coverage==7.17.2
+          /tmp/barkeep-test-env/bin/python -m coverage run --source=mcp -m unittest discover -s Tests/Python
+          /tmp/barkeep-test-env/bin/python -m coverage report --fail-under=100
+      - uses: actions/upload-artifact@v4
+        with:
+          name: swift-coverage
+          path: .build/**/codecov/*.json
       - name: Build
         run: swift build -c release
       - name: Package app bundle

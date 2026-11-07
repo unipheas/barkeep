@@ -97,8 +97,33 @@ final class DeviceAppsTests: XCTestCase {
         await model.stage(url: dir.appendingPathComponent("missing.tgz")); XCTAssertNotNil(model.error)
         await model.stage(url: url); client.host = "new-bar.test"
         await model.install(); XCTAssertNil(model.staged); XCTAssertTrue(model.error!.contains("Device changed"))
+        client.host = "bar.test"
         HTTPStub.handler = { _ in (404, Data()) }
         await model.refresh(); XCTAssertTrue(model.error!.contains("1.3.1")); XCTAssertFalse(model.working)
+    }
+
+    func testRequestIsolationAndInvalidTransportResponses() async throws {
+        let bad = BusyBarClient(host: "[", session: HTTPStub.session())
+        XCTAssertThrowsError(try bad.request("GET", "/status"))
+        HTTPStub.handler = { _ in (-1, Data()) }
+        do { _ = try await client.status(); XCTFail("Accepted a non-HTTP response") }
+        catch { XCTAssertEqual(error.localizedDescription, "No HTTP response") }
+        let req = URLRequest(url:URL(string:"http://bar.test/api/status")!)
+        let response = HTTPURLResponse(url:req.url!,statusCode:302,httpVersion:nil,headerFields:nil)!
+        let session = URLSession(configuration:.ephemeral)
+        let task = session.dataTask(with:req)
+        var redirected = true
+        NoRedirectDelegate().urlSession(session,task:task,willPerformHTTPRedirection:response,newRequest:req) {
+            redirected = $0 != nil
+        }
+        XCTAssertFalse(redirected)
+        session.invalidateAndCancel()
+        let tokenEndpoint = try XCTUnwrap(DeviceEndpoint.all.first { $0.path == "/access/tokens/{short_id}" })
+        XCTAssertThrowsError(try tokenEndpoint.prepare(values:["short_id":"../oops"],json:"",file:nil))
+        let nameEndpoint = try XCTUnwrap(DeviceEndpoint.all.first { $0.path == "/name" && $0.method == "POST" })
+        let prepared = try nameEndpoint.prepare(values:[:],json:#"{"name":"BarKeep"}"#,file:nil)
+        XCTAssertNotNil(prepared.body)
+        XCTAssertThrowsError(try nameEndpoint.prepare(values:[:],json:"invalid",file:nil))
     }
 
     func testCatalogCoversFirmwareAndValidatesRequests() throws {
@@ -116,7 +141,7 @@ final class DeviceAppsTests: XCTestCase {
         XCTAssertThrowsError(try stage.prepare(values: [:], json: "", file: nil))
         XCTAssertEqual(try stage.prepare(values: [:], json: "", file: Data([3])).body, Data([3]))
         let profile = try XCTUnwrap(DeviceEndpoint.all.first { $0.path == "/busy/profiles/{slot}" && $0.isReadOnly })
-        XCTAssertEqual(try profile.prepare(values: ["slot":"1"], json: "", file: nil).path, "/busy/profiles/1")
+        XCTAssertEqual(try profile.prepare(values: ["slot":"busy"], json: "", file: nil).path, "/busy/profiles/busy")
         XCTAssertThrowsError(try profile.prepare(values: ["slot":"../x"], json: "", file: nil))
         for endpoint in DeviceEndpoint.all where endpoint.contentType == "application/json" {
             XCTAssertNoThrow(try JSONSerialization.jsonObject(with: Data(endpoint.bodyTemplate.utf8)), endpoint.id)

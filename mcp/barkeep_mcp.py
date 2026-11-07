@@ -12,10 +12,22 @@ import sys
 import time
 import urllib.request
 import urllib.parse
+import urllib.error
+import re
+from pathlib import Path
 
 HOST = os.environ.get("BARKEEP_HOST", "10.0.4.20")
 TOKEN = os.environ.get("BARKEEP_TOKEN", "")
-API = f"http://{HOST}/api"
+def normalized_host(value):
+    parsed = urllib.parse.urlsplit(value if "://" in value else "http://" + value)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError("Use a local device hostname or IP address")
+    host = parsed.hostname
+    if ":" in host:
+        host = "[" + host + "]"
+    return host + (":" + str(parsed.port) if parsed.port else "")
+
+API = f"http://{normalized_host(HOST)}/api"
 
 COLORS = {
     "white": "#FFFFFFFF", "red": "#FF3B30FF", "green": "#34C759FF",
@@ -78,18 +90,90 @@ TOOLS = [
 ]
 
 
-def api(method, path, body=None, query=None):
+_APP_ID = {"type": "string", "description": "Installed app ID, e.g. app.busy.clock"}
+
+def tool(name, description, properties=None, required=None, read=False):
+    return {"name": name, "description": description,
+            "inputSchema": {"type": "object", "properties": properties or {}, "required": required or [], "additionalProperties": False},
+            "annotations": {"readOnlyHint": read, "destructiveHint": not read, "openWorldHint": False}}
+
+TOOLS += [
+    tool("bar_apps_list", "List installed JS apps. Requires firmware 1.3.1+.", read=True),
+    tool("bar_app_stage", "Upload and validate a local .tgz/.tar app package. Returns app details and a single-use install_key; does not install or launch it.", {"path": {"type": "string"}}, ["path"]),
+    tool("bar_app_install", "Install the staged app using its single-use install_key. Replaces an existing version. Only when the user requests installation.", {"install_key": {"type": "integer", "minimum": 0, "maximum": 4294967295}}, ["install_key"]),
+    tool("bar_app_launch", "Launch an installed app on the bar when requested.", {"app_id": _APP_ID}, ["app_id"]),
+    tool("bar_app_stop", "Stop the running JS app when requested."),
+    tool("bar_app_remove", "Remove an installed app when requested; retains its saved settings.", {"app_id": _APP_ID}, ["app_id"]),
+    tool("bar_app_settings_get", "Read an app's complete settings document.", {"app_id": _APP_ID}, ["app_id"], read=True),
+    tool("bar_app_settings_set", "Replace the complete app settings document when requested. Include its version and every value.", {"app_id": _APP_ID, "settings": {"type": "object"}}, ["app_id", "settings"]),
+    tool("bar_app_settings_reset", "Reset app settings to defaults when requested.", {"app_id": _APP_ID}, ["app_id"]),
+    tool("bar_api_read", "Read a local device API endpoint. Supply a path like /wifi/status; query parameters are separate. No remote URLs.", {"path": {"type": "string"}, "query": {"type": "object"}}, ["path"], read=True),
+    tool("bar_api_write", "Change a local device API setting only when the user requests that specific action. Supports network, Bluetooth, Matter, time, firmware, input and other documented controls.", {"method": {"type": "string", "enum": ["POST", "PUT", "DELETE"]}, "path": {"type": "string"}, "query": {"type": "object"}, "body": {"type": "object"}}, ["method", "path"]),
+]
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def api(method, path, body=None, query=None, raw=None, timeout=8, binary=False):
+    if method not in ("GET", "POST", "PUT", "DELETE", "PATCH"):
+        raise ValueError("Invalid HTTP method")
+    if not path.startswith("/") or path.startswith("//") or any(x in path for x in ("..", "?", "#", "://")):
+        raise ValueError("Use a local API path beginning with /, without a query string")
+    if any(ord(c) < 32 or ord(c) == 127 for c in TOKEN):
+        raise ValueError("BARKEEP_TOKEN contains control characters")
     url = API + path
     if query:
         url += "?" + urllib.parse.urlencode(query)
-    data = json.dumps(body).encode() if body is not None else None
+    data = raw if raw is not None else json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method)
-    if data:
-        req.add_header("Content-Type", "application/json")
+    if data is not None:
+        req.add_header("Content-Type", "application/octet-stream" if raw is not None else "application/json")
     if TOKEN:
         req.add_header("X-API-Token", TOKEN)
-    with urllib.request.urlopen(req, timeout=8) as resp:
-        return json.loads(resp.read().decode() or "{}")
+    try:
+        with urllib.request.build_opener(NoRedirect()).open(req, timeout=timeout) as resp:
+            result = resp.read()
+    except urllib.error.HTTPError as exc:
+        detail = exc.read(1000).decode(errors="replace")
+        raise ValueError(f"HTTP {exc.code} {path}: {detail}") from exc
+    if binary:
+        return result
+    if not result:
+        return {}
+    try:
+        return json.loads(result)
+    except (ValueError, UnicodeDecodeError):
+        return {"text": result.decode(errors="replace")}
+
+
+def app_id(value):
+    if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_-][A-Za-z0-9_.-]{0,31}", value):
+        raise ValueError("Invalid Busy Bar app ID")
+    return value
+
+
+def package_bytes(path):
+    file = Path(path).expanduser()
+    if file.suffix.lower() not in (".tgz", ".tar", ".gz"):
+        raise ValueError("Choose a .tgz or .tar app package")
+    if not 0 < file.stat().st_size <= 64 * 1024 * 1024:
+        raise ValueError("App package must contain 1 byte to 64 MB")
+    return file.read_bytes()
+
+
+def settings_document(value):
+    if not isinstance(value, dict) or type(value.get("version")) is not int or value["version"] < 1 or not isinstance(value.get("values"), dict):
+        raise ValueError("Settings require an integer version and a values object")
+    return value
+
+
+def integer(value, low, high, name):
+    if type(value) is not int or not low <= value <= high:
+        raise ValueError(f"{name} must be an integer from {low} to {high}")
+    return value
 
 
 def bar_settings(theme):
@@ -110,7 +194,32 @@ def color_hex(value):
 
 
 def handle_tool(name, args):
+    if not isinstance(args, dict):
+        raise ValueError("Tool arguments must be an object")
+    if name == "bar_apps_list":
+        return json.dumps(api("GET", "/apps/list"))
+    if name == "bar_app_stage":
+        return json.dumps(api("POST", "/apps/stage", raw=package_bytes(args["path"]), timeout=120))
+    if name == "bar_app_install":
+        key = integer(args["install_key"], 0, 4294967295, "install_key")
+        return json.dumps(api("POST", "/apps/install", query={"install_key": key}, timeout=120))
+    if name == "bar_app_stop":
+        return json.dumps(api("POST", "/apps/quit"))
+    if name in ("bar_app_launch", "bar_app_remove", "bar_app_settings_get", "bar_app_settings_set", "bar_app_settings_reset"):
+        query = {"app_id": app_id(args["app_id"])}
+        method, path = {
+            "bar_app_launch": ("POST", "/apps/launch"), "bar_app_remove": ("DELETE", "/apps"),
+            "bar_app_settings_get": ("GET", "/apps/settings"), "bar_app_settings_set": ("PUT", "/apps/settings"),
+            "bar_app_settings_reset": ("DELETE", "/apps/settings")}[name]
+        body = settings_document(args["settings"]) if name == "bar_app_settings_set" else None
+        return json.dumps(api(method, path, query=query, body=body))
+    if name in ("bar_api_read", "bar_api_write"):
+        method = "GET" if name == "bar_api_read" else args["method"]
+        if name == "bar_api_write" and method not in ("POST", "PUT", "DELETE"):
+            raise ValueError("Write method must be POST, PUT or DELETE")
+        return json.dumps(api(method, args["path"], query=args.get("query"), body=args.get("body"), timeout=120))
     if name == "bar_send_message":
+        integer(args.get("seconds", 30), 0, 86400, "seconds")
         text = "".join(c for c in args["text"] if 0x20 <= ord(c) <= 0x7E).strip()
         if not text:
             return "Message was empty after removing non-ASCII characters."
@@ -132,6 +241,8 @@ def handle_tool(name, args):
         return f"Displayed: {text}"
 
     if name == "bar_set_busy":
+        if type(args["on"]) is not bool:
+            raise ValueError("on must be a boolean")
         if args["on"]:
             put_snapshot({
                 "type": "INFINITE",
@@ -144,6 +255,7 @@ def handle_tool(name, args):
         return "Busy OFF"
 
     if name == "bar_start_timer":
+        integer(args["minutes"], 1, 480, "minutes")
         put_snapshot({
             "type": "SIMPLE",
             "card_id": "00000000-0000-0000-0000-000000000000",
@@ -154,11 +266,14 @@ def handle_tool(name, args):
         return f"Timer started: {args['minutes']} minutes"
 
     if name == "bar_clear":
+        failures = []
         for app in ("busybar_mcp", "busybar_cli", "busybar_mac"):
             try:
                 api("DELETE", "/display/draw", query={"application_name": app})
-            except Exception:
-                pass
+            except Exception as exc:
+                failures.append(str(exc))
+        if failures:
+            raise ValueError("Could not clear all displays: " + "; ".join(failures))
         return "Display cleared"
 
     if name == "bar_status":
@@ -194,6 +309,9 @@ def main():
             msg = json.loads(line)
         except json.JSONDecodeError:
             continue
+        if not isinstance(msg, dict):
+            reply(None, error={"code": -32600, "message": "Invalid Request"})
+            continue
         method = msg.get("method")
         msg_id = msg.get("id")
 
@@ -211,7 +329,7 @@ def main():
         elif method == "tools/list":
             reply(msg_id, {"tools": TOOLS})
         elif method == "tools/call":
-            params = msg.get("params", {})
+            params = msg.get("params") or {}
             try:
                 text = handle_tool(params.get("name"), params.get("arguments") or {})
                 reply(msg_id, {"content": [{"type": "text", "text": text}]})
@@ -224,5 +342,66 @@ def main():
             reply(msg_id, error={"code": -32601, "message": f"method not found: {method}"})
 
 
+def cli(argv):
+    import argparse
+    parser = argparse.ArgumentParser(prog="barkeep", description="Busy Bar app management and local API access")
+    commands = parser.add_subparsers(dest="command", required=True)
+    apps = commands.add_parser("apps", aliases=["app"])
+    actions = apps.add_subparsers(dest="action", required=True)
+    actions.add_parser("list")
+    install = actions.add_parser("install")
+    install.add_argument("path", help="Built .tgz or .tar package")
+    for name in ("run", "remove", "settings", "reset-settings"):
+        p = actions.add_parser(name)
+        p.add_argument("app_id")
+    save = actions.add_parser("set-settings")
+    save.add_argument("app_id"); save.add_argument("file", help="Complete settings JSON file")
+    actions.add_parser("stop")
+    request = commands.add_parser("api")
+    request.add_argument("method", choices=["GET", "POST", "PUT", "DELETE"])
+    request.add_argument("path")
+    request.add_argument("--query", default="{}", help="Query parameters as a JSON object")
+    request.add_argument("--json", help="Request JSON object")
+    request.add_argument("--file", help="Binary file to upload")
+    request.add_argument("--output", help="Write response bytes to this local file")
+    args = parser.parse_args(argv)
+    try:
+        if args.command == "api":
+            if args.json is not None and args.file:
+                raise ValueError("Use --json or --file, not both")
+            query = json.loads(args.query)
+            if not isinstance(query, dict): raise ValueError("--query must be an object")
+            raw = None
+            if args.file:
+                file = Path(args.file)
+                if file.stat().st_size > 256 * 1024 * 1024: raise ValueError("File must be under 256 MB")
+                raw = file.read_bytes()
+            result = api(args.method, args.path, query=query, body=json.loads(args.json) if args.json else None,
+                         raw=raw, timeout=120, binary=bool(args.output))
+            if args.output:
+                Path(args.output).write_bytes(result)
+                print(f"Saved {len(result)} bytes to {args.output}")
+                return 0
+        elif args.action == "install":
+            staged = json.loads(handle_tool("bar_app_stage", {"path": args.path}))
+            info = staged.get("staged", {})
+            print(f"Installing {info.get('name', '')} {info.get('version', '')}", file=sys.stderr)
+            result = json.loads(handle_tool("bar_app_install", {"install_key": staged["install_key"]}))
+        else:
+            tool_name = {"list":"bar_apps_list", "run":"bar_app_launch", "remove":"bar_app_remove",
+                         "settings":"bar_app_settings_get", "set-settings":"bar_app_settings_set",
+                         "reset-settings":"bar_app_settings_reset", "stop":"bar_app_stop"}[args.action]
+            tool_args = {"app_id": args.app_id} if hasattr(args, "app_id") else {}
+            if args.action == "set-settings": tool_args["settings"] = json.loads(Path(args.file).read_text())
+            result = json.loads(handle_tool(tool_name, tool_args))
+        print(json.dumps(result, indent=2))
+        return 0
+    except (ValueError, OSError, KeyError) as exc:
+        print(f"barkeep: {exc}", file=sys.stderr)
+        return 1
+
+
 if __name__ == "__main__":
+    if sys.argv[1:2] == ["--cli"]:
+        sys.exit(cli(sys.argv[2:]))
     main()

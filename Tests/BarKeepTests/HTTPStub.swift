@@ -1,7 +1,7 @@
 import XCTest
 @testable import BarKeep
 
-final class HTTPStub: URLProtocol, @unchecked Sendable {
+final class HTTPStub: URLProtocol {
     static var handler: ((URLRequest) throws -> (Int, Data))?
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -9,8 +9,10 @@ final class HTTPStub: URLProtocol, @unchecked Sendable {
         do {
             guard let handler = Self.handler else { throw URLError(.badServerResponse) }
             let (status, data) = try handler(request)
-            client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status,
-                httpVersion: "HTTP/1.1", headerFields: nil)!, cacheStoragePolicy: .notAllowed)
+            let response: URLResponse = status == -1
+                ? URLResponse(url:request.url!,mimeType:nil,expectedContentLength:data.count,textEncodingName:nil)
+                : HTTPURLResponse(url:request.url!,statusCode:status,httpVersion:"HTTP/1.1",headerFields:nil)!
+            client?.urlProtocol(self, didReceive:response,cacheStoragePolicy:.notAllowed)
             client?.urlProtocol(self, didLoad: data)
             client?.urlProtocolDidFinishLoading(self)
         } catch { client?.urlProtocol(self, didFailWithError: error) }

@@ -8,6 +8,8 @@
 #   barkeep clear
 #   barkeep sound
 #   barkeep status
+#   barkeep apps list|install|run|stop|remove|settings|set-settings|reset-settings
+#   barkeep api GET|POST|PUT|DELETE /path [--query JSON] [--json JSON] [--file PATH] [--output PATH]
 #
 # Env: BARKEEP_HOST (default 10.0.4.20), BARKEEP_TOKEN (the local HTTP API
 #      password configured on the bar; needed for Wi-Fi),
@@ -52,9 +54,9 @@ api() {
     [[ "$TOKEN" == *$'\n'* || "$TOKEN" == *$'\r'* ]] && die "BARKEEP_TOKEN contains line breaks"
     [[ -n "$TOKEN" ]] && auth=(-H "X-API-Token: $TOKEN")
     if [[ -n "$body" ]]; then
-        out=$($CURL -sS -m 8 -X "$method" "$API$path" "${auth[@]}" -H 'Content-Type: application/json' -d "$body") || die "cannot reach bar at $HOST"
+        out=$($CURL --fail-with-body -sS -m 8 -X "$method" "$API$path" "${auth[@]}" -H 'Content-Type: application/json' -d "$body") || die "cannot reach bar at $HOST"
     else
-        out=$($CURL -sS -m 8 -X "$method" "$API$path" "${auth[@]}") || die "cannot reach bar at $HOST"
+        out=$($CURL --fail-with-body -sS -m 8 -X "$method" "$API$path" "${auth[@]}") || die "cannot reach bar at $HOST"
     fi
     if [[ "$out" == *'"error"'* ]]; then
         die "device error: $out"
@@ -75,6 +77,13 @@ cmd=$1
 [[ -n "$cmd" ]] && shift
 
 case "$cmd" in
+apps|app|api)
+    script_dir="${0:A:h}"
+    helper="$script_dir/../libexec/barkeep_mcp.py"
+    [[ -f "$helper" ]] || helper="$script_dir/../mcp/barkeep_mcp.py"
+    [[ -f "$helper" ]] || die "cannot find BarKeep developer tools; reinstall barkeep-cli"
+    exec /usr/bin/python3 "$helper" --cli "$cmd" "$@"
+    ;;
 send)
     text=$1
     [[ -n "$text" ]] || die "usage: barkeep send \"text\" [-c color] [-f font] [-t seconds] [-l ledcolor]"
@@ -88,6 +97,8 @@ send)
             l) led=$(color_hex "$OPTARG") || exit 1 ;;
         esac
     done
+    [[ "$seconds" == <-> && $seconds -le 86400 ]] || die "seconds must be 0–86400"
+    [[ "$font" == (tiny|small|normal|condensed|bold|large|extra_large) ]] || die "unknown font"
     # Device fonts are ASCII bitmap fonts; strip anything else.
     text=$(print -rn -- "$text" | LC_ALL=C tr -cd '\40-\176')
     [[ -n "$text" ]] || die "message is empty after removing non-ASCII characters"
@@ -110,11 +121,12 @@ busy)
     ;;
 timer)
     minutes=$1
-    [[ "$minutes" == <-> && $minutes -gt 0 ]] || die "usage: barkeep timer <minutes>"
+    [[ "$minutes" == <-> && $minutes -gt 0 && $minutes -le 480 ]] || die "usage: barkeep timer <minutes>"
     snapshot "{\"type\":\"SIMPLE\",\"card_id\":\"00000000-0000-0000-0000-000000000000\",\"time_left_ms\":$(( minutes * 60000 )),\"is_paused\":false,\"busy_bar_settings\":$(bar_settings "$THEME")}"
     ;;
 pomodoro)
     work=${1:-25} rest=${2:-5} cycles=${3:-4}
+    [[ "$work" == <-> && $work -ge 1 && $work -le 480 && "$rest" == <-> && $rest -ge 1 && $rest -le 480 && "$cycles" == <-> && $cycles -ge 1 && $cycles -le 100 ]] || die "pomodoro needs work/rest minutes 1–480 and cycles 1–100"
     work_ms=$(( work * 60000 ))
     snapshot "{\"type\":\"INTERVAL\",\"card_id\":\"00000000-0000-0000-0000-000000000000\",\"current_interval\":1,\"current_interval_time_total_ms\":$work_ms,\"current_interval_time_left_ms\":$work_ms,\"is_paused\":false,\"interval_settings\":{\"type\":\"INTERVAL\",\"interval_work_ms\":$work_ms,\"interval_rest_ms\":$(( rest * 60000 )),\"interval_work_cycles_count\":$cycles,\"is_autostart_enabled\":false},\"busy_bar_settings\":$(bar_settings "$THEME")}"
     ;;
@@ -132,7 +144,7 @@ status)
     print
     ;;
 *)
-    sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
     exit 1
     ;;
 esac

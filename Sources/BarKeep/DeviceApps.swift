@@ -62,7 +62,7 @@ extension BusyBarClient {
         let document = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         guard let version = document?["version"] as? NSNumber,
               CFGetTypeID(version) != CFBooleanGetTypeID(),
-              version.doubleValue >= 0, version.doubleValue.rounded() == version.doubleValue,
+              version.doubleValue >= 1, version.doubleValue.rounded() == version.doubleValue,
               document?["values"] is [String: Any] else {
             throw BusyBarError(message: "Settings need an integer version and a values object. Load the current settings first.")
         }
@@ -95,12 +95,13 @@ final class DeviceAppsModel {
     private(set) var message: String?
     private(set) var error: String?
     private(set) var staged: StagedApp?
-    private var stagedHost: String?
     private(set) var settingsApp: DeviceApp?
     var settingsJSON = ""
-    let client: BusyBarClient
+    private(set) var settingsSchema: AppSettingsSchema?
+    private let client: BusyBarClient
+    private let liveClient: BusyBarClient
 
-    init(client: BusyBarClient) { self.client = client }
+    init(client: BusyBarClient) { self.liveClient = client; self.client = client.snapshot() }
 
     func refresh() async {
         await perform {
@@ -112,7 +113,6 @@ final class DeviceAppsModel {
     func stage(url: URL) async {
         await perform {
             self.staged = nil
-            self.stagedHost = nil
             guard ["tgz", "tar", "gz"].contains(url.pathExtension.lowercased()) else {
                 throw BusyBarError(message: "Choose a Busy Bar app package (.tgz or .tar).")
             }
@@ -121,22 +121,17 @@ final class DeviceAppsModel {
             guard size <= 64 * 1024 * 1024 else { throw BusyBarError(message: "App packages must be under 64 MB.") }
             let host = self.client.host
             let staged = try await self.client.stageApp(Data(contentsOf: url))
-            guard host == self.client.host else { throw BusyBarError(message: "Device changed during upload. Upload again.") }
+            guard host == self.liveClient.host, self.client.token == self.liveClient.token else { throw BusyBarError(message: "Device changed during upload. Upload again.") }
             self.staged = staged
-            self.stagedHost = host
             self.message = "Ready to install \(staged.staged.name)."
         }
     }
 
-    func cancelInstall() { staged = nil; stagedHost = nil; message = nil }
+    func cancelInstall() { staged = nil; message = nil }
 
     func install() async {
         guard let staged else { return }
         await perform {
-            guard self.stagedHost == self.client.host else {
-                self.cancelInstall()
-                throw BusyBarError(message: "Device changed. Upload the package again.")
-            }
             // Single-use key: discard even if the response is lost; do not retry blindly.
             self.cancelInstall()
             try await self.client.installApp(key: staged.install_key)
@@ -171,11 +166,19 @@ final class DeviceAppsModel {
             self.closeSettings()
             let json = try await self.client.appSettings(id: app.id)
             self.settingsJSON = json
+            // The optional schema lives with the package metadata. Older apps can still use JSON.
+            if let data = try? await self.client.api("GET", "/storage/read",
+                query: ["path": "/ext/user_assets/\(app.id)/appmeta/settings.json"]),
+               let schema = try? JSONDecoder().decode(AppSettingsSchema.self, from: data),
+               let document = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any],
+               document["version"] as? Int == schema.version {
+                self.settingsSchema = schema
+            }
             self.settingsApp = app
         }
     }
 
-    func closeSettings() { settingsApp = nil; settingsJSON = "" }
+    func closeSettings() { settingsApp = nil; settingsJSON = ""; settingsSchema = nil }
 
     func saveSettings() async {
         guard let app = settingsApp else { return }
@@ -199,7 +202,13 @@ final class DeviceAppsModel {
         guard !working else { return }
         working = true; error = nil; message = nil
         defer { working = false }
-        do { try await operation() }
+        do {
+            guard client.host == liveClient.host, client.token == liveClient.token else {
+                cancelInstall(); closeSettings()
+                throw BusyBarError(message: "Device changed. Refresh the Apps tab before continuing.")
+            }
+            try await operation()
+        }
         catch {
             if let apiError = error as? BusyBarError, apiError.statusCode == 404 {
                 self.error = "JS apps need Busy Bar firmware 1.3.1 or later. Check for a firmware update in Settings."

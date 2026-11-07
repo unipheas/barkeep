@@ -11,7 +11,8 @@ final class SlackSync: @unchecked Sendable {
     var statusText: String = "On a call"
     var statusEmoji: String = ":headphones:"
 
-    private let session = URLSession(configuration: .ephemeral)
+    private let session: URLSession
+    init(session: URLSession = URLSession(configuration: .ephemeral)) { self.session = session }
 
     func setBusy(_ busy: Bool) async -> String? {
         guard !token.isEmpty else { return nil }
@@ -47,7 +48,10 @@ final class SlackSync: @unchecked Sendable {
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
         req.timeoutInterval = 10
-        let (data, _) = try await session.data(for: req)
+        let (data, response) = try await session.data(for: req)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw BusyBarError(message: "Slack request failed (HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)).")
+        }
         let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         if json?["ok"] as? Bool != true {
             let error = json?["error"] as? String ?? "unknown error"

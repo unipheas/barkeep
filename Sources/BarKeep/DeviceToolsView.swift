@@ -132,6 +132,7 @@ struct DeviceToolsView: View {
 
     private func execute(_ endpoint: DeviceEndpoint) async {
         guard !working else { return }
+        let client = state.client.snapshot()
         working = true; error = nil; response = ""; responseData = nil
         defer { working = false }
         do {
@@ -140,10 +141,15 @@ struct DeviceToolsView: View {
                 guard size <= 256 * 1024 * 1024 else { throw BusyBarError(message: "Choose a file smaller than 256 MB.") }
             }
             let prepared = try endpoint.prepare(values: values, json: json, file: try upload.map { try Data(contentsOf: $0) })
-            let data = try await state.client.api(endpoint.method, prepared.path, query: prepared.query,
+            let data = try await client.api(endpoint.method, prepared.path, query: prepared.query,
                 body: prepared.body, contentType: endpoint.contentType, timeout: 120)
+            guard client.host == state.client.host, client.token == state.client.token else { return }
             responseData = data
-            response = (try? BusyBarClient.prettyJSON(data)) ?? String(data: data, encoding: .utf8) ?? "Received \(data.count) binary bytes. Save the response to a file."
+            if data.count > 64 * 1024 {
+                response = "Received \(data.count) bytes. Save the response to view the complete file."
+            } else {
+                response = (try? BusyBarClient.prettyJSON(data)) ?? String(data: data, encoding: .utf8) ?? "Received \(data.count) binary bytes. Save the response to a file."
+            }
             if response.isEmpty { response = "Completed successfully." }
         } catch { self.error = error.localizedDescription }
     }

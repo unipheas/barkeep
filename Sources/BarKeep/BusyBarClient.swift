@@ -67,7 +67,7 @@ final class BusyBarClient: @unchecked Sendable {
     }
 
     func request(_ method: String, _ path: String, query: [String: String] = [:], body: Data? = nil, contentType: String = "application/json") throws -> URLRequest {
-        guard path.hasPrefix("/"), !path.contains(".."), !path.contains("?"), !path.contains("#"), !path.contains("://") else {
+        guard path.hasPrefix("/"), !path.hasPrefix("//"), !path.contains(".."), !path.contains("?"), !path.contains("#"), !path.contains("://") else {
             throw BusyBarError(message: "Invalid local API path")
         }
         let normalizedHost = Self.normalizedHost(host)

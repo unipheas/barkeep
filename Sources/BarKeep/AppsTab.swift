@@ -24,6 +24,7 @@ struct AppsContent: View {
     @Bindable var model: DeviceAppsModel
     @State private var removing: DeviceApp?
     @State private var confirmReset = false
+    @State private var advancedSettings = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -81,7 +82,7 @@ struct AppsContent: View {
                     }
                 }
             }
-            .frame(maxHeight: 230)
+            .frame(height: 230)
             Button("Stop Running App") { Task { await model.stop() } }.controlSize(.small)
 
             if model.working { ProgressView("Working…").controlSize(.small).font(.caption) }
@@ -101,10 +102,16 @@ struct AppsContent: View {
         .sheet(isPresented: Binding(get: { model.settingsApp != nil }, set: { if !$0 { model.closeSettings() } })) {
             VStack(alignment: .leading, spacing: 12) {
                 Text("\(model.settingsApp?.name ?? "App") Settings").font(.headline)
-                Text("Edit the complete settings document. Keep its version and all existing fields.")
-                    .font(.caption).foregroundStyle(.secondary)
-                TextEditor(text: $model.settingsJSON).font(.system(.body, design: .monospaced))
-                    .border(.quaternary).frame(minHeight: 210)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        if let schema = model.settingsSchema {
+                            AppSettingsForm(fields: schema.fields, json: $model.settingsJSON)
+                            DisclosureGroup("Advanced JSON", isExpanded: $advancedSettings) {
+                                settingsEditor
+                            }
+                        } else { settingsEditor }
+                    }
+                }.frame(height: 300)
                 if let error = model.error { Text(error).font(.caption).foregroundStyle(.red) }
                 if let message = model.message { Text(message).font(.caption).foregroundStyle(.secondary) }
                 HStack {
@@ -118,6 +125,15 @@ struct AppsContent: View {
                     Button("Cancel", role: .cancel) {}
                     Button("Reset", role: .destructive) { Task { await model.resetSettings() } }
                 } message: { Text("This replaces all settings with the app's defaults.") }
+        }
+    }
+
+    private var settingsEditor: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Keep the version and all existing fields in this complete settings document.")
+                .font(.caption).foregroundStyle(.secondary)
+            TextEditor(text: $model.settingsJSON).font(.system(.body, design: .monospaced))
+                .border(.quaternary).frame(height: 210)
         }
     }
 
