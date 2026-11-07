@@ -3,6 +3,20 @@ import XCTest
 @testable import BarKeep
 
 final class SystemMonitorTests: XCTestCase {
+    @MainActor func testScheduledCalendarTimerRefreshesFixtureSource() async throws {
+        let source = FixtureCalendarSource()
+        let monitor = CalendarMonitor(source: source, center: NotificationCenter())
+        monitor.start()
+        defer { monitor.stop() }
+        let value = try XCTUnwrap(Mirror(reflecting: monitor).children.first { $0.label == "timer" }?.value)
+        let timer = try XCTUnwrap((value as? Timer) ?? (Mirror(reflecting: value).children.first?.value as? Timer))
+        XCTAssertEqual(timer.timeInterval, 60)
+        let before = source.reads
+        timer.fire()
+        for _ in 0..<100 where source.reads == before { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertEqual(source.reads, before + 1)
+    }
+
     func testPingLoopbackAndFailureCases() async {
         let success = await PingMonitor.measure(host:"127.0.0.1")
         XCTAssertNotNil(success)

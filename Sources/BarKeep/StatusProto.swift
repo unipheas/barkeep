@@ -93,14 +93,14 @@ enum StatusProto {
         mutating func varint() throws -> UInt64 {
             var value: UInt64 = 0
             var shift = 0
-            while true {
-                guard index < bytes.count else { throw invalid() }
+            while index < bytes.count {
                 let byte = bytes[index]; index += 1
                 if shift == 63 && byte > 1 { throw invalid() }
                 value |= UInt64(byte & 0x7F) << shift
                 if byte & 0x80 == 0 { return value }
                 shift += 7
             }
+            throw invalid() // Input ended before the terminating varint byte.
         }
         mutating func fixed(_ count: Int) throws -> UInt64 {
             let data = try take(count)

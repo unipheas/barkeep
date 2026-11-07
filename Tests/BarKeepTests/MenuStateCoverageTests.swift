@@ -112,6 +112,30 @@ final class MenuStateCoverageTests: XCTestCase {
         XCTAssertEqual(text, "after")
     }
 
+    @MainActor func testSecureFieldUpdatesExistingNativeControl() async throws {
+        var text = "fixture-before"
+        let binding = Binding(get: { text }, set: { text = $0 })
+        let host = NSHostingView(rootView: CompactSecureField(text: binding, placeholder: "Fixture"))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 160, height: 40),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        defer { window.contentView = nil; window.close() }
+        host.layoutSubtreeIfNeeded()
+        func secure(_ view: NSView) -> NSSecureTextField? {
+            if let field = view as? NSSecureTextField { return field }
+            return view.subviews.compactMap { secure($0) }.first
+        }
+        await settle { secure(host) != nil }
+        let native = try XCTUnwrap(secure(host))
+        XCTAssertEqual(native.stringValue, "fixture-before")
+        text = "fixture-after"
+        host.rootView = CompactSecureField(text: binding, placeholder: "Updated fixture")
+        host.layoutSubtreeIfNeeded()
+        await settle { native.stringValue == "fixture-after" }
+        XCTAssertEqual(native.placeholderString, "Updated fixture")
+    }
+
     static func reply(_ request: URLRequest) throws -> (Int, Data) {
         let body: String
         switch request.url!.path {

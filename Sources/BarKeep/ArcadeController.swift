@@ -155,6 +155,7 @@ final class ArcadeController {
     var errorMessage: String?
 
     private let client: BusyBarClient
+    private let encodeFrame: (ArcadeFrame) -> Data?
     private let keyboard: any ArcadeKeyboardCapturing
     private let defaults: UserDefaults
     private var engine = ArcadeEngine(game: .snake)
@@ -168,8 +169,10 @@ final class ArcadeController {
     private var uploadLifecycle = ArcadeUploadLifecycle()
     private var consecutiveFailures = 0
 
-    init(client: BusyBarClient, keyboard: (any ArcadeKeyboardCapturing)? = nil, defaults: UserDefaults = .standard) {
+    init(client: BusyBarClient, keyboard: (any ArcadeKeyboardCapturing)? = nil, defaults: UserDefaults = .standard,
+         encodeFrame: @escaping (ArcadeFrame) -> Data? = ArcadeRenderer.pngData) {
         self.client = client
+        self.encodeFrame = encodeFrame
         self.keyboard = keyboard ?? ArcadeKeyboardCapture()
         self.defaults = defaults
         self.showPreview = defaults.bool(forKey: "arcadeShowPreview")
@@ -284,7 +287,7 @@ final class ArcadeController {
             framesDropped += 1
             return
         }
-        guard let png = ArcadeRenderer.pngData(from: engine.frame) else {
+        guard let png = encodeFrame(engine.frame) else {
             errorMessage = "Could not encode the arcade frame."
             return
         }

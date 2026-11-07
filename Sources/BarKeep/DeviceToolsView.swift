@@ -7,8 +7,11 @@ struct DeviceToolsView: View {
     @State private var search = ""
     @State private var selectedID: String?
     @State private var model: DeviceToolsModel
+    private let exportFile: FileExport.Handler
 
-    init(endpoint: DeviceEndpoint? = nil, model: DeviceToolsModel? = nil) {
+    init(endpoint: DeviceEndpoint? = nil, model: DeviceToolsModel? = nil,
+         exportFile: @escaping FileExport.Handler = FileExport.present) {
+        self.exportFile = exportFile
         _selectedID = State(initialValue: (endpoint ?? DeviceEndpoint.all.first { $0.path == "/status" })?.id)
         _model = State(initialValue: model ?? DeviceToolsModel())
     }
@@ -117,10 +120,8 @@ struct DeviceToolsView: View {
 
     private func saveResponse() {
         guard let data = model.responseData else { return }
-        let panel = NSSavePanel(); panel.nameFieldStringValue = "busy-bar-response"
-        panel.begin {
-            guard $0 == .OK, let url = panel.url else { return }
-            do { try data.write(to: url, options: .atomic) } catch { model.error = error.localizedDescription }
+        exportFile(data, "busy-bar-response") { result in
+            if case .failure(let error) = result { model.error = error.localizedDescription }
         }
     }
 

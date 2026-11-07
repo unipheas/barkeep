@@ -95,7 +95,7 @@ final class BusyBarClient: @unchecked Sendable {
         if !query.isEmpty {
             components?.queryItems = query.map { URLQueryItem(name: $0.key, value: $0.value) }
         }
-        guard let url = components?.url else {
+        guard let url = components?.url, let hostname = components?.host, !hostname.isEmpty else {
             throw BusyBarError(message: "Bad URL for host \(host)")
         }
         var req = URLRequest(url: url)

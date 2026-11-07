@@ -52,6 +52,7 @@ struct CompactSecureField: NSViewRepresentable {
 
 @MainActor
 struct MenuView: View {
+    @Environment(\.openURL) private var openURL
     #if DEBUG
     // Hosted tests observe real tab State and lifecycle cancellation.
     internal var didAppear: ((Self) -> Void)?
@@ -140,7 +141,7 @@ struct MenuView: View {
             }
             Button {
                 if let url = BusyBarClient.webInterfaceURL(for: state.host) {
-                    NSWorkspace.shared.open(url)
+                    openURL(url)
                 }
             } label: {
                 Image(systemName: "globe")
@@ -788,6 +789,7 @@ struct ConnectionSettings: View {
 
 @MainActor
 struct SettingsTab: View {
+    @Environment(\.openURL) private var openURL
     @Environment(\.openWindow) private var openWindow
     @Environment(AppState.self) private var state
     @State private var launchAtLogin = false
@@ -912,7 +914,7 @@ struct SettingsTab: View {
                     .foregroundStyle(.orange)
                 Button("Open Full Disk Access Settings…") {
                     if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
-                        NSWorkspace.shared.open(url)
+                        openURL(url)
                     }
                 }
                 .font(.caption)

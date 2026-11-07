@@ -14,11 +14,12 @@ final class DeviceStatusSocket: StatusSocket {
     func start() { task.resume() }
     func enable() async throws { try await task.send(.string(#"{"enable":true}"#)) }
     func receive() async throws -> Data {
-        switch try await task.receive() {
-        case .data(let data): return data
-        case .string: throw BusyBarError(message:"Expected a binary status packet from the bar.")
-        @unknown default: throw BusyBarError(message:"Unsupported status message.")
+        // The protocol accepts only binary messages; reject all other current
+        // or future URLSession message kinds with the same fail-closed rule.
+        guard case .data(let data) = try await task.receive() else {
+            throw BusyBarError(message:"Expected a binary status packet from the bar.")
         }
+        return data
     }
     func close() { task.cancel(with:.normalClosure,reason:nil) }
 }

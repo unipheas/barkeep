@@ -21,6 +21,7 @@ final class AppState {
     private var connection: DeviceConnection
     private let defaults: UserDefaults
     private let weatherSession: URLSession
+    private let renderMessage: (String, String) -> Data?
     private(set) var connectionRevision = 0
     private var connectionTask: Task<Void, Never>?
     private(set) var isConnecting = false
@@ -227,12 +228,15 @@ final class AppState {
         calendarSource: CalendarSource? = nil,
         localNetworkPermissionTrigger: LocalNetworkPermissionTrigger? = nil,
         micMonitor: MicMonitor? = nil,
-        notificationWatcher: NotificationWatcher? = nil
+        notificationWatcher: NotificationWatcher? = nil,
+        arcadeKeyboard: (any ArcadeKeyboardCapturing)? = nil,
+        renderMessage: @escaping (String, String) -> Data? = MessageRenderer.renderToPNG
     ) {
         let connection = DeviceConnection(defaults: defaults)
         self.connection = connection
         self.defaults = defaults
         self.weatherSession = weatherSession
+        self.renderMessage = renderMessage
         self.calendarMonitor = CalendarMonitor(source: calendarSource)
         self.localNetworkPermissionTrigger = localNetworkPermissionTrigger ?? LocalNetworkPermissionTrigger()
         self.micMonitor = micMonitor ?? MicMonitor()
@@ -266,7 +270,7 @@ final class AppState {
         self.client = BusyBarClient(host: connection.host, token: connection.token, session: session)
         self.slackSync = SlackSync(session: slackSession)
         self.transportType = connection.mode.rawValue
-        self.arcade = ArcadeController(client: self.client, defaults: defaults)
+        self.arcade = ArcadeController(client: self.client, keyboard: arcadeKeyboard, defaults: defaults)
         self.slackSync.token = self.slackToken
         calendarMonitor.onChange = { [weak self] in self?.calendarChanged() }
         guard startServices else { return }
@@ -978,7 +982,7 @@ final class AppState {
                 if MessageRenderer.isPlainASCII(trimmed) {
                     try await endpoint.drawText(trimmed, font: font, colorHex: hex, timeout: timeoutSeconds, priority: 95)
                 } else {
-                    guard let png = MessageRenderer.renderToPNG(trimmed, colorHex: hex) else {
+                    guard let png = renderMessage(trimmed, hex) else {
                         throw BusyBarError(message: "Could not render message image")
                     }
                     try await endpoint.uploadAsset(filename: "message.png", data: png)

@@ -3,6 +3,10 @@ import SwiftUI
 /// The settings sheet shares the app model so edits and save results remain in sync.
 @MainActor
 struct AppSettingsSheet: View {
+    #if DEBUG
+    // Inspect installed State in hosted interaction tests.
+    internal var didAppear: ((Self) -> Void)?
+    #endif
     @Bindable var model: DeviceAppsModel
     @State private var confirmReset = false
     @State private var advancedSettings = false
@@ -39,6 +43,9 @@ struct AppSettingsSheet: View {
                 Button("Cancel", role: .cancel) {}
                 Button("Reset", role: .destructive) { Task { await model.resetSettings() } }
             } message: { Text("This replaces all settings with the app's defaults.") }
+        #if DEBUG
+        .onAppear { didAppear?(self) }
+        #endif
     }
 
     private var settingsEditor: some View {

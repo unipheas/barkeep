@@ -96,6 +96,10 @@ enum AppSettingsDocument {
 
 @MainActor
 struct AppSettingsForm: View {
+    #if DEBUG
+    // Inspect installed State in hosted interaction tests.
+    internal var didAppear: ((Self) -> Void)?
+    #endif
     let fields: [String: AppSettingsSchema.Field]
     var path: [String] = []
     @Binding var json: String
@@ -113,6 +117,9 @@ struct AppSettingsForm: View {
             }
             if let editError { Text(editError).foregroundStyle(.red).font(.caption) }
         }
+        #if DEBUG
+        .onAppear { didAppear?(self) }
+        #endif
     }
 
     @ViewBuilder private func fieldView(_ key: String, _ field: AppSettingsSchema.Field) -> some View {

@@ -109,7 +109,7 @@ enum MessageRenderer {
     }
 
     static func rgbaHex(from color: NSColor) -> String {
-        let rgb = color.usingColorSpace(.deviceRGB) ?? .white
+        let rgb = color.usingColorSpace(.deviceRGB) ?? NSColor(deviceRed: 1, green: 1, blue: 1, alpha: 1)
         return String(
             format: "#%02X%02X%02X%02X",
             Int(round(rgb.redComponent * 255)),

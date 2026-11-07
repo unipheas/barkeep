@@ -11,7 +11,8 @@ protocol CalendarSource {
 
 @MainActor
 final class SystemCalendarSource: CalendarSource {
-    private let store = EKEventStore()
+    private let store: EKEventStore
+    init(store: EKEventStore = EKEventStore()) { self.store = store }
     var authorizationStatus: EKAuthorizationStatus { EKEventStore.authorizationStatus(for:.event) }
     var notificationObject: AnyObject { store }
     func requestAccess() async throws -> Bool { try await store.requestFullAccessToEvents() }

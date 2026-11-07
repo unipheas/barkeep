@@ -2,10 +2,15 @@ import SwiftUI
 
 @MainActor
 struct StatusStreamView: View {
+    #if DEBUG
+    internal var didAppear: ((Self) -> Void)?
+    #endif
     @Environment(AppState.self) private var state
     @State private var model: StatusStreamModel
     @State private var saveError: String?
-    init(model: StatusStreamModel? = nil) {
+    private let exportFile: FileExport.Handler
+    init(model: StatusStreamModel? = nil, exportFile: @escaping FileExport.Handler = FileExport.present) {
+        self.exportFile = exportFile
         _model = State(initialValue: model ?? StatusStreamModel())
     }
 
@@ -31,17 +36,20 @@ struct StatusStreamView: View {
                     .frame(maxWidth:.infinity,alignment:.leading).padding(10).background(.quaternary)
             }
         }
+        #if DEBUG
+        .onAppear { didAppear?(self) }
+        #endif
         .onDisappear { model.stop() }
         .onChange(of:state.host) { _,_ in model.stop() }
         .onChange(of:state.token) { _,_ in model.stop() }
     }
     private func save() {
         guard let data = model.latestData else { return }
-        let panel = NSSavePanel(); panel.nameFieldStringValue = "busy-bar-status.json"
-        panel.begin {
-            guard $0 == .OK, let url = panel.url else { return }
-            do { try data.write(to:url,options:.atomic); saveError = nil }
-            catch { saveError = error.localizedDescription }
+        exportFile(data, "busy-bar-status.json") { result in
+            switch result {
+            case .success: saveError = nil
+            case .failure(let error): saveError = error.localizedDescription
+            }
         }
     }
 }

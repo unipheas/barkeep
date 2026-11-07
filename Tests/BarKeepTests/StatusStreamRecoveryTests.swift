@@ -2,6 +2,26 @@ import XCTest
 @testable import BarKeep
 
 final class StatusStreamRecoveryTests: XCTestCase {
+    @MainActor func testDefaultSocketFactoryRejectsInvalidEndpointWithoutNetwork() {
+        let model = StatusStreamModel()
+        defer { model.stop() }
+        for host in ["", "[invalid"] {
+            model.start(client: BusyBarClient(host: host))
+            XCTAssertFalse(model.running)
+            XCTAssertNotNil(model.error)
+            XCTAssertNil(model.latestData)
+        }
+    }
+
+    func testTruncatedMaximumVarintFailsAtEveryByteBoundary() throws {
+        let tag = Data([0xF8, 0x07])
+        let payload = Data(Array(repeating: UInt8(0xFF), count: 9) + [1])
+        for length in 0..<payload.count {
+            XCTAssertThrowsError(try StatusProto.decode(tag + payload.prefix(length)), "Truncation at byte \(length)")
+        }
+        XCTAssertTrue(try StatusProto.decode(tag + payload).isEmpty)
+    }
+
     @MainActor func testLateFailureFromReplacedConnectionCannotStopNewStream() async throws {
         let old = RecoverySocket()
         let replacement = RecoverySocket()
