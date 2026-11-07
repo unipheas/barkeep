@@ -125,6 +125,7 @@ final class MenuStateCoverageTests: XCTestCase {
         window.isReleasedWhenClosed = false
         window.contentView = host
         defer { window.contentView = nil; window.close() }
+        XCTAssertEqual(host.fittingSize, CGSize(width: 140, height: 22))
         host.layoutSubtreeIfNeeded()
         func secure(_ view: NSView) -> NSSecureTextField? {
             if let field = view as? NSSecureTextField { return field }

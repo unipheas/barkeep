@@ -29,7 +29,7 @@
 ## Validation and limits
 
 The local whole-source gate passed **7,916/7,916 production Swift lines (100%)**
-on Xcode 27.2, combining 194 passing tests and four successful native acceptance
+on Xcode 27.2, combining the passing Swift suite and four successful native acceptance
 modes. All production Swift files remain compiled and tracked. LLVM emits no
 executable line mapping for two generated static JSON catalogs; inventory checks
 permit their absence only at reviewed content hashes. The two opt-in physical

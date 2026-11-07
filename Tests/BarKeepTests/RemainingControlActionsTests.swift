@@ -122,6 +122,31 @@ final class RemainingControlActionsTests: XCTestCase {
         XCTAssertEqual(exports, 0)
     }
 
+    @MainActor func testMessageReturnSubmitsInstalledText() async throws {
+        let suite = "dev.barkeep.message-submit.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.set("wifi", forKey: "connectionMode")
+        defaults.set("fixture.test", forKey: "wifiHost")
+        defer { defaults.removePersistentDomain(forName: suite); HTTPStub.handler = nil }
+        let sent = expectation(description: "Return submits the composed message")
+        HTTPStub.handler = { request in
+            let body = String(decoding: HTTPStub.body(request), as: UTF8.self)
+            if body.contains("Return-key fixture") { sent.fulfill() }
+            return (200, Data("{}".utf8))
+        }
+        let state = AppState(defaults: defaults, startServices: false, session: HTTPStub.session())
+        var sut = MessageTab()
+        let inspected = sut.on(\.didAppear) { view in
+            let input = try view.find(ViewType.TextField.self)
+            try input.setInput("Return-key fixture")
+            try input.callOnSubmit()
+        }
+        ViewHosting.host(view: sut.environment(state))
+        defer { ViewHosting.expel() }
+        await fulfillment(of: [inspected, sent], timeout: 5)
+        XCTAssertNil(state.lastError)
+    }
+
     @MainActor func testQueuedPresetSaveAfterMessageClearedDoesNotCreateEmptyPreset() async throws {
         let suite = "dev.barkeep.queued-preset.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
