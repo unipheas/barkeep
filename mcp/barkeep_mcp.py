@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Zero-dependency MCP stdio server exposing the Busy Bar's local HTTP API.
 
-Tools: bar_send_message, bar_set_busy, bar_start_timer, bar_clear, bar_status.
+Tools include messaging, busy sessions, app management, and local device API access.
 Host defaults to the USB address (10.0.4.20); override with BARKEEP_HOST.
 For Wi-Fi, BARKEEP_TOKEN is the local HTTP API password configured on the bar,
 not a cloud.busy.app API token.
@@ -39,8 +39,8 @@ TOOLS = [
     {
         "name": "bar_send_message",
         "description": "Scroll a text message across the Busy Bar's front LED display. "
-                       "ASCII only (the device uses bitmap fonts). Fails while a busy "
-                       "session is active — the device rejects drawing during sessions.",
+                       "ASCII only (the device uses bitmap fonts). This can temporarily cover "
+                       "the current device screen, including a busy session.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -308,44 +308,118 @@ def main():
         try:
             msg = json.loads(line)
         except json.JSONDecodeError:
+            reply(None, error={"code": -32700, "message": "Parse error"})
             continue
-        if not isinstance(msg, dict):
+        if (not isinstance(msg, dict) or msg.get("jsonrpc") != "2.0"
+                or not isinstance(msg.get("method"), str)
+                or ("id" in msg and type(msg["id"]) not in (int, str))):
             reply(None, error={"code": -32600, "message": "Invalid Request"})
             continue
         method = msg.get("method")
         msg_id = msg.get("id")
+        # Notifications must never produce responses or execute tool mutations.
+        if "id" not in msg:
+            continue
+        params = msg.get("params", {})
+        if not isinstance(params, dict):
+            reply(msg_id, error={"code": -32602, "message": "params must be an object"})
+            continue
 
         if method == "initialize":
             reply(msg_id, {
-                "protocolVersion": msg.get("params", {}).get("protocolVersion", "2024-11-05"),
+                "protocolVersion": (params.get("protocolVersion") if params.get("protocolVersion") in
+                    ("2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25") else "2025-11-25"),
                 "capabilities": {"tools": {}},
                 "serverInfo": {"name": "barkeep", "version": "1.1.0"},
                 "instructions": "Use these tools when the user asks to control or inspect their Busy Bar. "
                                 "Do not change busy state, start timers, clear the display, or send "
                                 "messages unless the user requests that action.",
             })
-        elif method == "notifications/initialized":
-            continue
         elif method == "tools/list":
             reply(msg_id, {"tools": TOOLS})
         elif method == "tools/call":
-            params = msg.get("params") or {}
             try:
-                text = handle_tool(params.get("name"), params.get("arguments") or {})
+                text = handle_tool(params.get("name"), params.get("arguments", {}))
                 reply(msg_id, {"content": [{"type": "text", "text": text}]})
             except Exception as exc:
                 reply(msg_id, {"content": [{"type": "text", "text": f"Error: {exc}"}],
                                "isError": True})
         elif method == "ping":
             reply(msg_id, {})
-        elif msg_id is not None:
+        else:
             reply(msg_id, error={"code": -32601, "message": f"method not found: {method}"})
+
+
+def cli_color(value):
+    if value.lower() in COLORS:
+        return COLORS[value.lower()]
+    if re.fullmatch(r"#[0-9A-Fa-f]{8}", value):
+        return value
+    raise ValueError("Use a color name or #RRGGBBAA")
+
+
+def run_cli_control(args):
+    theme = getattr(args, "theme", os.environ.get("BARKEEP_THEME", "on_air"))
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", theme):
+        raise ValueError("Invalid theme name")
+    if args.command == "send":
+        seconds = integer(args.seconds, 0, 86400, "seconds")
+        text = "".join(c for c in args.text if 0x20 <= ord(c) <= 0x7E)
+        if not text.strip():
+            raise ValueError("Message is empty after removing non-ASCII characters")
+        payload = {"application_name": "busybar_cli", "priority": 95, "elements": [{
+            "id":"cli", "type":"text", "text":text, "font":args.font,
+            "color":cli_color(args.color), "align":"mid_left", "x":0, "y":8, "width":72,
+            "scroll_rate":2500, "scroll_start_delay":800, "scroll_repeat_delay":1500,
+            "timeout":seconds, "display":"front"}]}
+        if args.led:
+            payload["led_notification_color"] = cli_color(args.led)
+        api("POST", "/display/draw", payload)
+    elif args.command == "busy":
+        handle_tool("bar_set_busy", {"on":args.state == "on", "theme":theme})
+    elif args.command == "timer":
+        handle_tool("bar_start_timer", {"minutes":args.minutes, "theme":theme})
+    elif args.command == "pomodoro":
+        work = integer(args.work, 1, 480, "work minutes") * 60000
+        rest = integer(args.rest, 1, 480, "rest minutes") * 60000
+        cycles = integer(args.cycles, 1, 100, "cycles")
+        put_snapshot({"type":"INTERVAL", "card_id":"00000000-0000-0000-0000-000000000000",
+            "current_interval":1, "current_interval_time_total_ms":work,
+            "current_interval_time_left_ms":work, "is_paused":False,
+            "interval_settings":{"type":"INTERVAL", "interval_work_ms":work, "interval_rest_ms":rest,
+                "interval_work_cycles_count":cycles, "is_autostart_enabled":False},
+            "busy_bar_settings":bar_settings(theme)})
+    elif args.command == "clear":
+        for app in ("busybar_cli", "busybar_mac"):
+            api("DELETE", "/display/draw", query={"application_name":app})
+    elif args.command == "sound":
+        api("POST", "/audio/play", {"application_name":"busybar_cli", "stock_path":"shared/calendar_event_starts.snd"})
+    elif args.command == "status":
+        print(json.dumps(api("GET", "/status"), indent=2))
+        print(json.dumps(api("GET", "/busy/snapshot"), indent=2))
 
 
 def cli(argv):
     import argparse
     parser = argparse.ArgumentParser(prog="barkeep", description="Busy Bar app management and local API access")
     commands = parser.add_subparsers(dest="command", required=True)
+    send = commands.add_parser("send", help="Show a message on the bar")
+    send.add_argument("text")
+    send.add_argument("-c", "--color", default="white")
+    send.add_argument("-f", "--font", choices=["tiny","small","normal","condensed","bold","large","extra_large"], default="normal")
+    send.add_argument("-t", "--seconds", type=int, default=30)
+    send.add_argument("-l", "--led")
+    busy = commands.add_parser("busy", help="Set busy state")
+    busy.add_argument("state", choices=["on", "off"], nargs="?", default="on")
+    busy.add_argument("-T", "--theme", default=os.environ.get("BARKEEP_THEME", "on_air"))
+    timer = commands.add_parser("timer", help="Start a countdown")
+    timer.add_argument("minutes", type=int)
+    pomodoro = commands.add_parser("pomodoro", help="Start an interval session")
+    pomodoro.add_argument("work", type=int, nargs="?", default=25)
+    pomodoro.add_argument("rest", type=int, nargs="?", default=5)
+    pomodoro.add_argument("cycles", type=int, nargs="?", default=4)
+    for name in ("clear", "sound", "status"):
+        commands.add_parser(name)
     apps = commands.add_parser("apps", aliases=["app"])
     actions = apps.add_subparsers(dest="action", required=True)
     actions.add_parser("list")
@@ -366,6 +440,9 @@ def cli(argv):
     request.add_argument("--output", help="Write response bytes to this local file")
     args = parser.parse_args(argv)
     try:
+        if args.command in ("send", "busy", "timer", "pomodoro", "clear", "sound", "status"):
+            run_cli_control(args)
+            return 0
         if args.command == "api":
             if args.json is not None and args.file:
                 raise ValueError("Use --json or --file, not both")

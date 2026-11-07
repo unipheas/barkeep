@@ -14,6 +14,7 @@ APP="dist/BarKeep.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp packaging/Info.plist "$APP/Contents/Info.plist"
+cp THIRD_PARTY_NOTICES.md "$APP/Contents/Resources/THIRD_PARTY_NOTICES.md"
 cp .build/release/BarKeep "$APP/Contents/MacOS/BarKeep"
 cp assets/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 

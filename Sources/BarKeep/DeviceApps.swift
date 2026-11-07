@@ -100,8 +100,15 @@ final class DeviceAppsModel {
     private(set) var settingsSchema: AppSettingsSchema?
     private let client: BusyBarClient
     private let liveClient: BusyBarClient
+    private let launchAction: ((BusyBarClient, DeviceApp) async throws -> Void)?
+    private let stopAction: (() -> Void)?
 
-    init(client: BusyBarClient) { self.liveClient = client; self.client = client.snapshot() }
+    init(client: BusyBarClient,
+         launchAction: ((BusyBarClient, DeviceApp) async throws -> Void)? = nil,
+         stopAction: (() -> Void)? = nil) {
+        self.liveClient = client; self.client = client.snapshot()
+        self.launchAction = launchAction; self.stopAction = stopAction
+    }
 
     func refresh() async {
         await perform {
@@ -143,13 +150,18 @@ final class DeviceAppsModel {
 
     func launch(_ app: DeviceApp) async {
         await perform {
-            try await self.client.launchApp(id: app.id)
+            if let launchAction = self.launchAction { try await launchAction(self.client, app) }
+            else { try await self.client.launchApp(id: app.id) }
             self.message = "Launched \(app.name)."
         }
     }
 
     func stop() async {
-        await perform { try await self.client.quitApp(); self.message = "App stopped." }
+        await perform {
+            try await self.client.quitApp()
+            self.stopAction?()
+            self.message = "App stopped."
+        }
     }
 
     func remove(_ app: DeviceApp) async {

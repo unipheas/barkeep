@@ -126,25 +126,92 @@ class MCPTests(unittest.TestCase):
                 self.assertEqual(m.cli(['apps','install',str(package)]),0)
             self.assertEqual(m.cli(['api','POST','/x','--json','{}','--file',str(package)]),1)
             self.assertEqual(m.cli(['api','GET','/x','--query','[]']),1)
-        with patch.object(m,'handle_tool',return_value='ok'), patch('sys.stdin',io.StringIO('{"id":1,"method":"tools/call","params":{"name":"bar_status"}}')), contextlib.redirect_stdout(io.StringIO()) as out:
+        with patch.object(m,'handle_tool',return_value='ok'), patch('sys.stdin',io.StringIO('{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"bar_status"}}')), contextlib.redirect_stdout(io.StringIO()) as out:
             m.main()
             self.assertIn('ok',out.getvalue())
         import runpy
-        with patch('sys.stdin',io.StringIO('{"id":1,"method":"ping"}')), patch('sys.argv',['barkeep_mcp.py']), contextlib.redirect_stdout(io.StringIO()):
+        with patch('sys.stdin',io.StringIO('{"jsonrpc":"2.0","id":1,"method":"ping"}')), patch('sys.argv',['barkeep_mcp.py']), contextlib.redirect_stdout(io.StringIO()):
             runpy.run_path(str(ROOT/'mcp/barkeep_mcp.py'),run_name='__main__')
         with patch('sys.argv',['barkeep_mcp.py','--cli','apps','--help']), contextlib.redirect_stdout(io.StringIO()):
             with self.assertRaises(SystemExit) as result:
                 runpy.run_path(str(ROOT/'mcp/barkeep_mcp.py'),run_name='__main__')
             self.assertEqual(result.exception.code,0)
 
+    def test_protocol_rejects_bad_envelopes_and_does_not_execute_notifications(self):
+        messages = [
+            {"jsonrpc":"1.0","id":1,"method":"ping"},
+            {"jsonrpc":"2.0","id":None,"method":"ping"},
+            {"jsonrpc":"2.0","id":True,"method":"ping"},
+            {"jsonrpc":"2.0","id":2,"method":"initialize","params":[]},
+            {"jsonrpc":"2.0","method":"tools/call","params":{"name":"bar_clear"}},
+            {"jsonrpc":"2.0","id":3,"method":"initialize","params":{"protocolVersion":"unknown"}},
+            {"jsonrpc":"2.0","id":4,"method":"initialize","params":{"protocolVersion":"2025-11-25"}},
+        ]
+        with patch('sys.stdin',io.StringIO('\n'.join(json.dumps(x) for x in messages))), patch.object(m,'handle_tool') as handle, contextlib.redirect_stdout(io.StringIO()) as out:
+            m.main()
+        replies=[json.loads(x) for x in out.getvalue().splitlines()]
+        self.assertEqual([x['error']['code'] for x in replies[:4]],[-32600,-32600,-32600,-32602])
+        self.assertEqual(replies[4]['result']['protocolVersion'],'2025-11-25')
+        self.assertEqual(replies[5]['result']['protocolVersion'],'2025-11-25')
+        handle.assert_not_called()
+
+    def test_all_cli_controls_and_safe_json_payloads(self):
+        with patch.object(m,'api',return_value={}) as api, contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(m.cli(['send','A "quote" and \\ slash','-c','#12345678','-l','red','-f','bold','-t','0']),0)
+            payload=api.call_args.args[2]
+            self.assertEqual(payload['elements'][0]['text'],'A "quote" and \\ slash')
+            self.assertEqual(payload['elements'][0]['color'],'#12345678')
+            self.assertEqual(payload['elements'][0]['font'],'bold')
+            self.assertEqual(payload['led_notification_color'],'#FF3B30FF')
+            self.assertEqual(m.cli(['send','Simple']),0)
+            self.assertEqual(m.cli(['busy']),0)
+            self.assertEqual(api.call_args.args[2]['snapshot']['type'],'INFINITE')
+            self.assertEqual(m.cli(['busy','off']),0)
+            self.assertEqual(api.call_args.args[2]['snapshot']['type'],'NOT_STARTED')
+            self.assertEqual(m.cli(['timer','12']),0)
+            self.assertEqual(api.call_args.args[2]['snapshot']['time_left_ms'],720000)
+            self.assertEqual(m.cli(['pomodoro','30','10','3']),0)
+            snap=api.call_args.args[2]['snapshot']
+            self.assertEqual(snap['interval_settings']['interval_work_cycles_count'],3)
+            self.assertEqual(snap['interval_settings']['interval_rest_ms'],600000)
+            self.assertEqual(m.cli(['clear']),0)
+            self.assertEqual(api.call_args.kwargs['query'],{'application_name':'busybar_mac'})
+            self.assertEqual(m.cli(['sound']),0)
+            self.assertEqual(api.call_args.args[1],'/audio/play')
+            self.assertEqual(m.cli(['status']),0)
+            for arguments in [['send','🌞'],['send','hello','-c','invalid'],['send','hello','-t','-1'],['busy','on','-T','bad"theme'],['pomodoro','0']]:
+                self.assertEqual(m.cli(arguments),1)
+
+    def test_installed_cli_entrypoint_against_local_http_fixture(self):
+        import http.server
+        import threading
+        received=[]
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                received.append(json.loads(self.rfile.read(int(self.headers['Content-Length']))))
+                self.send_response(200); self.end_headers(); self.wfile.write(b'{}')
+            def log_message(self,*args): pass
+        server=http.server.HTTPServer(('127.0.0.1',0),Handler)
+        thread=threading.Thread(target=server.serve_forever,daemon=True); thread.start()
+        try:
+            import os
+            env=dict(os.environ,BARKEEP_HOST=f'127.0.0.1:{server.server_port}',BARKEEP_TOKEN='')
+            result=subprocess.run([str(ROOT/'bin/barkeep'),'send','CLI "fixture"','-c','blue'],env=env,capture_output=True,text=True,timeout=5)
+            self.assertEqual(result.returncode,0,result.stderr)
+            self.assertEqual(received[0]['elements'][0]['text'],'CLI "fixture"')
+            self.assertEqual(received[0]['application_name'],'busybar_cli')
+        finally:
+            server.shutdown(); server.server_close(); thread.join(timeout=2)
+
     def test_protocol_and_cli(self):
-        messages=[{'id':1,'method':'initialize','params':{}},{'method':'notifications/initialized'},
-                  {'id':2,'method':'tools/list'},{'id':3,'method':'tools/call','params':{'name':'nope'}},
-                  {'id':4,'method':'ping'},{'id':5,'method':'unsupported'},[]]
+        messages=[{'jsonrpc':'2.0','id':1,'method':'initialize','params':{}},{'jsonrpc':'2.0','method':'notifications/initialized'},
+                  {'jsonrpc':'2.0','id':2,'method':'tools/list'},{'jsonrpc':'2.0','id':3,'method':'tools/call','params':{'name':'nope'}},
+                  {'jsonrpc':'2.0','id':4,'method':'ping'},{'jsonrpc':'2.0','id':5,'method':'unsupported'},[]]
         with patch('sys.stdin',io.StringIO('\nnot-json\n'+'\n'.join(json.dumps(x) for x in messages))), patch('sys.stdout',new_callable=io.StringIO) as out:
             m.main()
         replies=[json.loads(x) for x in out.getvalue().splitlines()]
-        self.assertEqual(len(replies),6)
+        self.assertEqual(len(replies),7)
+        self.assertEqual(replies.pop(0)["error"]["code"],-32700)
         self.assertEqual(replies[0]['result']['serverInfo']['name'],'barkeep')
         self.assertTrue(replies[2]['result']['isError'])
         self.assertEqual(replies[4]['error']['code'],-32601)

@@ -6,14 +6,7 @@ struct DeviceToolsView: View {
     @Environment(AppState.self) private var state
     @State private var search = ""
     @State private var selectedID: String? = DeviceEndpoint.all.first { $0.path == "/status" }?.id
-    @State private var values: [String: String] = [:]
-    @State private var json = ""
-    @State private var upload: URL?
-    @State private var response = ""
-    @State private var responseData: Data?
-    @State private var working = false
-    @State private var error: String?
-    @State private var confirm = false
+    @State private var model = DeviceToolsModel()
 
     private var selected: DeviceEndpoint? { DeviceEndpoint.all.first { $0.id == selectedID } }
     private var matches: [DeviceEndpoint] {
@@ -38,16 +31,14 @@ struct DeviceToolsView: View {
                 }
             }.frame(width: 260)
             Divider()
-            if let selected {
+            if selected?.path == "/status/ws" {
+                ScrollView { StatusStreamView().padding(20) }
+            } else if let selected {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
                         Text(selected.title).font(.title2.bold())
                         Text("\(state.host) · API \(DeviceEndpoint.apiVersion)").font(.caption).foregroundStyle(.secondary)
                         if !selected.detail.isEmpty { Text(selected.detail).font(.callout) }
-                        if selected.path == "/status/ws" {
-                            Text("Real-time status uses a WebSocket stream. Use the live preview in the Device tab; this request cannot run as ordinary HTTP.")
-                                .font(.callout).foregroundStyle(.secondary)
-                        }
                         ForEach(selected.parameters, id: \.name) { parameter in
                             VStack(alignment: .leading, spacing: 4) {
                                 HStack {
@@ -67,90 +58,65 @@ struct DeviceToolsView: View {
                         }
                         if selected.contentType == "application/json" {
                             Text("Request settings (JSON)").font(.headline)
-                            TextEditor(text: $json).font(.system(.body, design: .monospaced)).frame(height: 190).border(.quaternary)
+                            TextEditor(text: $model.json).font(.system(.body, design: .monospaced)).frame(height: 190).border(.quaternary)
                             DisclosureGroup("Field reference") {
                                 Text(selected.bodySchema).font(.caption.monospaced()).textSelection(.enabled)
                             }
                         } else if selected.isBinary {
                             HStack {
                                 Button("Choose File…") { chooseUpload() }
-                                Text(upload?.lastPathComponent ?? "No file selected").font(.caption)
+                                Text(model.upload?.lastPathComponent ?? "No file selected").font(.caption)
                             }
                         }
                         HStack {
                             Button(selected.isReadOnly ? "Read from Bar" : "Apply to Bar…") {
-                                if selected.isReadOnly { Task { await execute(selected) } }
-                                else { confirm = true }
-                            }.buttonStyle(.borderedProminent).disabled(working || selected.path == "/status/ws")
-                            if working { ProgressView().controlSize(.small) }
+                                if selected.isReadOnly { Task { await model.execute(selected, client: state.client) } }
+                                else { model.prepareConfirmation(selected, client: state.client) }
+                            }.buttonStyle(.borderedProminent).disabled(model.working)
+                            if model.working { ProgressView().controlSize(.small) }
                             Spacer()
-                            Button("Save Response…") { saveResponse() }.disabled(responseData == nil)
+                            Button("Save Response…") { saveResponse() }.disabled(model.responseData == nil)
                         }
-                        if let error { Text(error).foregroundStyle(.red).font(.callout).textSelection(.enabled) }
-                        if !response.isEmpty {
+                        if let error = model.error { Text(error).foregroundStyle(.red).font(.callout).textSelection(.enabled) }
+                        if !model.response.isEmpty {
                             Text("Response").font(.headline)
-                            Text(response).font(.caption.monospaced()).textSelection(.enabled)
+                            Text(model.response).font(.caption.monospaced()).textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading).padding(10).background(.quaternary)
                         }
                     }.padding(20)
                 }
-                .disabled(working)
-                .alert("\(selected.title)?", isPresented: $confirm) {
+                .disabled(model.working)
+                .alert("\(selected.title)?", isPresented: $model.confirm) {
                     Button("Cancel", role: .cancel) {}
-                    Button("Apply") { Task { await execute(selected) } }
-                } message: { Text("Send \(selected.method) \(selected.path) to \(state.host) with the values shown. This changes the device. Network changes can disconnect it; firmware installation may restart it.") }
+                    Button("Apply") { Task { await model.applyConfirmed(client: state.client) } }
+                } message: { Text("Send \(selected.method) \(selected.path) to \(model.confirmationHost ?? state.host) with the values shown. This changes the device. Network changes can disconnect it; firmware installation may restart it.") }
             }
         }
         .frame(minWidth: 820, minHeight: 620)
         .onChange(of: selectedID) { _, _ in resetForm() }
         .onChange(of: state.host) { _, _ in resetForm() }
+        .onChange(of: state.token) { _, _ in resetForm() }
         .onAppear { resetForm() }
     }
 
     private func binding(_ key: String) -> Binding<String> {
-        Binding(get: { values[key] ?? "" }, set: { values[key] = $0 })
+        Binding(get: { model.values[key] ?? "" }, set: { model.values[key] = $0 })
     }
 
-    private func resetForm() {
-        values = Dictionary(uniqueKeysWithValues: (selected?.parameters ?? []).map { ($0.name, $0.defaultValue) })
-        json = selected?.bodyTemplate ?? ""; upload = nil; response = ""; responseData = nil; error = nil
-    }
+    private func resetForm() { model.reset(for: selected) }
 
     private func chooseUpload() {
         let panel = NSOpenPanel(); panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
-        panel.begin { if $0 == .OK { upload = panel.url } }
+        panel.begin { if $0 == .OK { model.upload = panel.url } }
     }
 
     private func saveResponse() {
-        guard let data = responseData else { return }
+        guard let data = model.responseData else { return }
         let panel = NSSavePanel(); panel.nameFieldStringValue = "busy-bar-response"
         panel.begin {
             guard $0 == .OK, let url = panel.url else { return }
-            do { try data.write(to: url, options: .atomic) } catch { self.error = error.localizedDescription }
+            do { try data.write(to: url, options: .atomic) } catch { model.error = error.localizedDescription }
         }
     }
 
-    private func execute(_ endpoint: DeviceEndpoint) async {
-        guard !working else { return }
-        let client = state.client.snapshot()
-        working = true; error = nil; response = ""; responseData = nil
-        defer { working = false }
-        do {
-            if let upload {
-                let size = try upload.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-                guard size <= 256 * 1024 * 1024 else { throw BusyBarError(message: "Choose a file smaller than 256 MB.") }
-            }
-            let prepared = try endpoint.prepare(values: values, json: json, file: try upload.map { try Data(contentsOf: $0) })
-            let data = try await client.api(endpoint.method, prepared.path, query: prepared.query,
-                body: prepared.body, contentType: endpoint.contentType, timeout: 120)
-            guard client.host == state.client.host, client.token == state.client.token else { return }
-            responseData = data
-            if data.count > 64 * 1024 {
-                response = "Received \(data.count) bytes. Save the response to view the complete file."
-            } else {
-                response = (try? BusyBarClient.prettyJSON(data)) ?? String(data: data, encoding: .utf8) ?? "Received \(data.count) binary bytes. Save the response to a file."
-            }
-            if response.isEmpty { response = "Completed successfully." }
-        } catch { self.error = error.localizedDescription }
-    }
 }

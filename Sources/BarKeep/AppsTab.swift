@@ -12,7 +12,9 @@ struct AppsTab: View {
             else { ProgressView().controlSize(.small) }
         }
         .task(id: state.host) {
-            let model = DeviceAppsModel(client: state.client)
+            let model = DeviceAppsModel(client: state.client,
+                launchAction: { client, app in try await state.launchDeviceApp(app, on: client) },
+                stopAction: { state.resumeWidgets() })
             self.model = model
             await model.refresh()
         }

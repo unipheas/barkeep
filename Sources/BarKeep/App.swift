@@ -3,11 +3,17 @@ import SwiftUI
 @main
 @MainActor
 struct BarKeepApp: App {
-    @State private var state = AppState()
+    @State private var state: AppState
 
     init() {
-        // Menu-bar-only app: no Dock icon.
+        let appState = AppState()
+        _state = State(initialValue: appState)
+        // Normal launch stays menu-bar-only. A regular window also makes the
+        // controls accessible when the menu item is hidden by macOS or the notch.
         NSApplication.shared.setActivationPolicy(.accessory)
+        if CommandLine.arguments.contains("--show-window") {
+            DispatchQueue.main.async { ControlsWindow.show(state: appState) }
+        }
     }
 
     var body: some Scene {
@@ -27,5 +33,22 @@ struct BarKeepApp: App {
                 .environment(state)
         }
         .windowResizability(.contentSize)
+    }
+}
+
+@MainActor
+private enum ControlsWindow {
+    static var window: NSWindow?
+
+    static func show(state: AppState) {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 600),
+                              styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.title = "BarKeep Controls"
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: MenuView().environment(state))
+        self.window = window
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 }

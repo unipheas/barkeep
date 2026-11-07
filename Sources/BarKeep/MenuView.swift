@@ -347,6 +347,14 @@ struct DeviceTab: View {
 
             Divider()
 
+            if state.widgetsPausedForApp {
+                HStack {
+                    Text("Widgets paused for device app").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Resume") { state.resumeWidgets() }.controlSize(.small)
+                }
+            }
+
             LabeledContent("Brightness") {
                 Picker("", selection: Binding(
                     get: { state.brightnessValue },

@@ -66,6 +66,14 @@ final class BusyBarClient: @unchecked Sendable {
 
     }
 
+    func statusSocket() throws -> StatusSocket {
+        var request = try request("GET", "/status/ws")
+        var components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!
+        components.scheme = "ws"
+        request.url = components.url
+        return DeviceStatusSocket(task: session.webSocketTask(with: request))
+    }
+
     func request(_ method: String, _ path: String, query: [String: String] = [:], body: Data? = nil, contentType: String = "application/json") throws -> URLRequest {
         guard path.hasPrefix("/"), !path.hasPrefix("//"), !path.contains(".."), !path.contains("?"), !path.contains("#"), !path.contains("://") else {
             throw BusyBarError(message: "Invalid local API path")

@@ -38,7 +38,13 @@ private final class ArcadeInputPanel: NSPanel {
 }
 
 @MainActor
-private final class ArcadeKeyboardCapture: NSObject, NSWindowDelegate {
+protocol ArcadeKeyboardCapturing: AnyObject {
+    func start(onEvent: @escaping (NSEvent) -> Void, onCaptured: @escaping () -> Void, onFocusLost: @escaping () -> Void)
+    func stop(restoreFocus: Bool)
+}
+
+@MainActor
+private final class ArcadeKeyboardCapture: NSObject, NSWindowDelegate, ArcadeKeyboardCapturing {
     private var panel: ArcadeInputPanel?
     private var eventMonitor: Any?
     private var previousApplication: NSRunningApplication?
@@ -142,14 +148,15 @@ final class ArcadeController {
     private(set) var controlsCaptured = false
     var showPreview: Bool {
         didSet {
-            UserDefaults.standard.set(showPreview, forKey: "arcadeShowPreview")
+            defaults.set(showPreview, forKey: "arcadeShowPreview")
             updatePreview()
         }
     }
     var errorMessage: String?
 
     private let client: BusyBarClient
-    private let keyboard = ArcadeKeyboardCapture()
+    private let keyboard: any ArcadeKeyboardCapturing
+    private let defaults: UserDefaults
     private var engine = ArcadeEngine(game: .snake)
     private var heldKeys = Set<ArcadeKey>()
     private var pressedKeys = Set<ArcadeKey>()
@@ -161,9 +168,11 @@ final class ArcadeController {
     private var uploadLifecycle = ArcadeUploadLifecycle()
     private var consecutiveFailures = 0
 
-    init(client: BusyBarClient) {
+    init(client: BusyBarClient, keyboard: (any ArcadeKeyboardCapturing)? = nil, defaults: UserDefaults = .standard) {
         self.client = client
-        self.showPreview = UserDefaults.standard.bool(forKey: "arcadeShowPreview")
+        self.keyboard = keyboard ?? ArcadeKeyboardCapture()
+        self.defaults = defaults
+        self.showPreview = defaults.bool(forKey: "arcadeShowPreview")
         updatePreview()
     }
 
@@ -224,6 +233,11 @@ final class ArcadeController {
         stop(withError: nil)
     }
 
+    func stopAndWait() async {
+        stop()
+        await uploadTask?.value
+    }
+
     private func stop(withError error: String?) {
         guard isActive else { return }
         uploadLifecycle.invalidateSession()
@@ -236,7 +250,7 @@ final class ArcadeController {
         heldKeys.removeAll()
         pressedKeys.removeAll()
         controlsCaptured = false
-        keyboard.stop()
+        keyboard.stop(restoreFocus: true)
         if let error {
             errorMessage = error
         }
@@ -278,10 +292,11 @@ final class ArcadeController {
         let frameGeneration = uploadLifecycle.beginUpload()
         let filename = "arcade\(uploadSlot).png"
         uploadSlot = (uploadSlot + 1) % 2
+        let endpoint = client.snapshot()
         uploadTask = Task { [weak self] in
             guard let self else { return }
             do {
-                try await self.client.uploadAsset(filename: filename, data: png)
+                try await endpoint.uploadAsset(filename: filename, data: png)
                 guard self.uploadLifecycle.shouldDraw(
                     uploadSession: frameGeneration,
                     isActive: self.isActive
@@ -291,7 +306,7 @@ final class ArcadeController {
                     }
                     return
                 }
-                try await self.client.drawImage(
+                try await endpoint.drawImage(
                     named: filename, timeout: 1, priority: 99
                 )
                 self.framesSent += 1

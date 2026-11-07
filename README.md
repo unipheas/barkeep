@@ -46,13 +46,13 @@ tools when you explicitly configure them.
   physical 72×16 display using your Mac keyboard. The Mac preview is optional
   and off by default.
 - 💤 **Slack sync** — bar goes busy → your Slack status becomes "🎧 On a call" + DND; clears after.
-- 📦 **JS apps** — list installed apps, upload `.tgz`/`.tar` packages, review replacements, install, run, stop, remove, and edit/reset app settings. Native controls are generated from each app's settings schema; advanced JSON is available for unsupported field types. Requires device firmware 1.3.1+.
-- 🛠 **All Device Controls** — a native, searchable API explorer in Settings for Wi-Fi, Bluetooth, storage, Matter, device/account settings, time, firmware updates, input and more. Supports request parameters, JSON, binary uploads and response export. Changes require reviewing the values and clicking Apply.
+- 📦 **JS apps** — list installed apps, upload `.tgz`/`.tar` packages, review replacements, install, run, stop, remove, and edit/reset app settings. Native controls are generated from each app's settings schema; advanced JSON is available for unsupported field types. Requires device firmware 1.3.1+. Launching an app stops Arcade and pauses ambient widgets; Stop Running App or Device → Resume restores widgets.
+- 🛠 **All Device Controls** — a native, searchable API explorer in Settings for Wi-Fi, Bluetooth, storage, Matter, device/account settings, time, firmware updates, input and more. Supports request parameters, JSON, binary uploads and response export. Changes require reviewing the values and clicking Apply. Includes a live WebSocket status inspector with decoded updates and packet export.
 - ⚙️ Brightness/volume control, device rename, firmware update check, launch at login.
 
 **Developer tools**
 
-- 🖥 **`barkeep` CLI** — `barkeep send "build done" -c green`, `barkeep busy on -T coding`, `barkeep timer 45`, `barkeep pomodoro`… zero dependencies, scriptable from anything.
+- 🖥 **`barkeep` CLI** — `barkeep send "build done" -c green`, `barkeep busy on -T coding`, `barkeep timer 45`, `barkeep pomodoro`… uses Python’s standard library, scriptable from anything.
 - 🤖 **Claude Code hooks** — the bar becomes your agent status light: green scroll + chime when a long task finishes, red flash when Claude waits on input.
 - 🔌 **MCP server** — exposes the bar as tools (`bar_send_message`, `bar_set_busy`, `bar_start_timer`, …) so Claude, Codex, and ChatGPT desktop can drive it directly.
 
@@ -129,6 +129,9 @@ cd barkeep
 ```
 
 This builds and launches `dist/BarKeep.app` (menu bar only, no Dock icon).
+For a regular controls window, quit BarKeep and launch with
+`open -a BarKeep --args --show-window`. This is useful when the menu item is hidden
+by the MacBook’s notch.
 Signing prefers a Developer ID Application identity, then Apple Development,
 or `$BARKEEP_SIGN_IDENTITY` when explicitly set; otherwise it falls back to
 ad-hoc.
