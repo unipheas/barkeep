@@ -1,4 +1,5 @@
 import AppKit
+import EventKit
 import XCTest
 @testable import BarKeep
 
@@ -29,6 +30,97 @@ final class AppStateTests: XCTestCase {
             try? await Task.sleep(for:.milliseconds(5))
         }
         XCTFail("State did not settle",file:file,line:line)
+    }
+
+    @MainActor func testCalendarBusyCountdownAndDisableLifecycle() async throws {
+        let source = AppCalendarFixture()
+        let now = Date()
+        let current = EKEvent(eventStore: EKEventStore())
+        current.title = "Fixture meeting"; current.startDate = now.addingTimeInterval(-60); current.endDate = now.addingTimeInterval(60)
+        let next = EKEvent(eventStore: EKEventStore())
+        next.title = "Fixture next"; next.startDate = now.addingTimeInterval(120); next.endDate = now.addingTimeInterval(300)
+        source.items = [current, next]
+        let app = AppState(defaults:defaults,startServices:false,session:HTTPStub.session(),calendarSource:source)
+        app.offDebounceSeconds = 0
+        app.sendMeetingCountdown() // No meeting is loaded yet.
+        app.calendarAutoBusy = true
+        await eventually { app.onCall && app.inMeeting }
+        XCTAssertEqual(app.nextMeetingTitle,"Fixture next")
+        XCTAssertTrue(app.calendarAccessGranted)
+        let sent = expectation(description:"Meeting countdown sent")
+        HTTPStub.handler = { request in
+            if request.url!.path == "/api/display/draw" { sent.fulfill() }
+            return (200,Data("{}".utf8))
+        }
+        app.lastError = "pending"
+        app.sendMeetingCountdown()
+        await fulfillment(of:[sent],timeout:2)
+        await eventually { app.lastError == nil }
+        HTTPStub.handler = { _ in (500,Data()) }
+        app.sendMeetingCountdown()
+        await eventually { app.lastError?.contains("500") == true }
+        HTTPStub.handler = { _ in (200,Data("{}".utf8)) }
+        app.calendarAutoBusy = false
+        await eventually { !app.onCall && !app.inMeeting }
+        XCTAssertNil(app.nextMeetingTitle); XCTAssertNil(app.nextMeetingDate)
+    }
+
+    @MainActor func testSlackSyncErrorsRemainVisibleAfterBusyChanges() async {
+        let app = state()
+        let original = HTTPStub.handler!
+        HTTPStub.handler = { request in
+            if request.url?.host == "slack.com" { return (200,Data(#"{"ok":false,"error":"missing_scope"}"#.utf8)) }
+            return try original(request)
+        }
+        app.slackToken = "fixture"; app.slackSyncEnabled = true
+        app.setOnCall(true)
+        await eventually { app.lastError?.contains("missing_scope") == true }
+        XCTAssertTrue(app.onCall)
+        app.lastError = nil
+        app.setOnCall(false)
+        await eventually { app.lastError?.contains("missing_scope") == true }
+        XCTAssertFalse(app.onCall)
+    }
+
+    @MainActor func testNotificationDoesNotChimeOrReplayOnNewDevice() async {
+        for queued in [false,true] {
+            defaults.set("usb",forKey:"connectionMode")
+            let app = state()
+            app.notificationAppFilter = ""
+            app.notificationChime = true
+            app.wifiHost = "second.test"
+            if queued { app.setOnCall(true); await eventually { app.onCall } }
+            let pending = expectation(description:"Notification drawing pending")
+            let finished = expectation(description:"Old response finished")
+            let release = DispatchSemaphore(value:0)
+            let lock = NSLock()
+            var drawnHosts: [String] = [], chimes = 0
+            HTTPStub.handler = { request in
+                if request.url!.path == "/api/display/draw" {
+                    lock.withLock { drawnHosts.append(request.url!.host!) }
+                    pending.fulfill()
+                    _ = release.wait(timeout:.now()+5)
+                    finished.fulfill()
+                }
+                if request.url!.path == "/api/audio/play" { lock.withLock { chimes += 1 } }
+                return (200,Data(#"{"snapshot":{"type":"NOT_STARTED"}}"#.utf8))
+            }
+            defer { release.signal() }
+            app.handleNotification(.init(bundleID:"fixture",title:"One",body:"Test"))
+            if queued {
+                app.handleNotification(.init(bundleID:"fixture",title:"Two",body:"Test"))
+                XCTAssertEqual(app.queuedCount,2)
+                app.setOnCall(false)
+            }
+            await fulfillment(of:[pending],timeout:2)
+            app.connectionMode = .wifi
+            release.signal()
+            await fulfillment(of:[finished],timeout:2)
+            await eventually { !app.isConnecting }
+            XCTAssertEqual(lock.withLock { drawnHosts },["10.0.4.20"])
+            XCTAssertEqual(lock.withLock { chimes },0)
+            XCTAssertEqual(app.queuedCount,0)
+        }
     }
 
     @MainActor func testPreferencesRoundTripWithoutStartingOSServices() {
@@ -321,4 +413,12 @@ final class AppStateTests: XCTestCase {
         await model.launch(fixture)
         XCTAssertFalse(app.widgetsPausedForApp); XCTAssertNotNil(model.error)
     }
+}
+
+@MainActor private final class AppCalendarFixture: CalendarSource {
+    let authorizationStatus: EKAuthorizationStatus = .fullAccess
+    let notificationObject: AnyObject = NSObject()
+    var items: [EKEvent] = []
+    func requestAccess() async throws -> Bool { true }
+    func events(from: Date, to: Date) -> [EKEvent] { items }
 }

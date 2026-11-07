@@ -3,7 +3,7 @@
 BarKeep ships a Developer ID signed, notarized ZIP through GitHub Releases.
 The Homebrew cask is `unipheas/barkeep/barkeep`, maintained in
 [`unipheas/homebrew-barkeep`](https://github.com/unipheas/homebrew-barkeep/blob/main/Casks/barkeep.rb).
-Creating a tag only runs Swift tests; it does not sign or publish the app.
+Creating a tag runs validation; it does not sign or publish the app.
 
 ## One-time local setup (requires explicit credential-action approval)
 
@@ -57,7 +57,10 @@ Start from the merged, passing main commit, preserve local edits, and verify
 that the intended version/tag/release does not already exist. Use the version in `packaging/Info.plist` and verify it matches the intended release.
 
 ```sh
-swift test
+swift test --enable-code-coverage
+python3 scripts/check-coverage.py "$(swift test --show-codecov-path)" --minimum 100
+python3 -m coverage run --source=mcp,hooks -m unittest discover -s Tests/Python
+python3 -m coverage report --fail-under=100
 swift build -c release
 ./scripts/release-on-nova.sh --check
 ./scripts/release-on-nova.sh
@@ -69,6 +72,11 @@ hardened runtime/timestamp, submits to Apple, staples the ticket, checks
 Gatekeeper acceptance, creates the final ZIP and verifies a fresh extraction.
 The wrapper does not generate or store credentials, create tags, or publish.
 A `*-local-validation.zip` or ad-hoc build is never a production release asset.
+The full-source Swift coverage gate is not yet satisfied for the firmware 1.3.1
+update. Do not release it until that gate passes. Use a Python environment with
+coverage 7.17.2 for the commands above. Interactive checks and opt-in hardware
+tests are documented in `docs/device-api-coverage.md`; mock Slack and calendar
+tests do not establish real-account integration results.
 
 ## Publish and make the release available through Homebrew
 
@@ -90,5 +98,11 @@ A `*-local-validation.zip` or ad-hoc build is never a production release asset.
    brew update
    brew upgrade --cask unipheas/barkeep/barkeep
    ```
+
+When updating the companion `barkeep-cli` formula, retain the entire `hooks`
+directory (including `agent_hook.py`) and `mcp/barkeep_mcp.py`. Its smoke test
+should run `barkeep --help` successfully; invoking the argparse CLI without a
+command exits with usage status 2. Verify the cask's architecture declaration
+matches the executable reported by `lipo -archs` before publishing.
 
 Do not operate on the user's work computer as part of publication.

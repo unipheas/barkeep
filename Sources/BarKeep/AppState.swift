@@ -185,7 +185,7 @@ final class AppState {
     private let localNetworkPermissionTrigger = LocalNetworkPermissionTrigger()
     private let micMonitor = MicMonitor()
     private let notificationWatcher = NotificationWatcher()
-    private let calendarMonitor = CalendarMonitor()
+    private let calendarMonitor: CalendarMonitor
     private let slackSync: SlackSync
     private var offDebounceTask: Task<Void, Never>?
     private var pingTask: Task<Void, Never>?
@@ -196,6 +196,7 @@ final class AppState {
     private var launchedDeviceAppID: String?
     private var lastWeatherIconEmoji: String?
     private var queuedNotifications: [String] = []
+    private var notificationReplayTask: Task<Void, Never>?
     /// True when this app started the busy session (so we only clear our own).
     private var weSetBusy = false
 
@@ -206,11 +207,12 @@ final class AppState {
         ("mail", "#0078D4FF"),
     ]
 
-    init(defaults: UserDefaults = .standard, startServices: Bool = true, session: URLSession? = nil, slackSession: URLSession = .shared, weatherSession: URLSession = .shared) {
+    init(defaults: UserDefaults = .standard, startServices: Bool = true, session: URLSession? = nil, slackSession: URLSession = .shared, weatherSession: URLSession = .shared, calendarSource: CalendarSource? = nil) {
         let connection = DeviceConnection(defaults: defaults)
         self.connection = connection
         self.defaults = defaults
         self.weatherSession = weatherSession
+        self.calendarMonitor = CalendarMonitor(source: calendarSource)
         self.autoOnCall = defaults.object(forKey: "autoOnCall") as? Bool ?? true
         self.theme = defaults.string(forKey: "theme") ?? "on_air"
         self.triggerSmartHome = defaults.object(forKey: "triggerSmartHome") as? Bool ?? true
@@ -242,6 +244,7 @@ final class AppState {
         self.transportType = connection.mode.rawValue
         self.arcade = ArcadeController(client: self.client, defaults: defaults)
         self.slackSync.token = self.slackToken
+        calendarMonitor.onChange = { [weak self] in self?.calendarChanged() }
         guard startServices else { return }
         localNetworkPermissionTrigger.onAccessAvailable = { [weak self] in
             Task { @MainActor [weak self] in
@@ -265,7 +268,6 @@ final class AppState {
         }
         if forwardNotifications { notificationWatcher.start() }
 
-        calendarMonitor.onChange = { [weak self] in self?.calendarChanged() }
         if calendarAutoBusy { calendarMonitor.start() }
 
         Task { await refreshDeviceStatus() }
@@ -277,6 +279,10 @@ final class AppState {
         if arcade.isActive { arcade.stop() }
         connection.save(to: defaults)
         connectionRevision += 1
+        notificationReplayTask?.cancel()
+        notificationReplayTask = nil
+        queuedNotifications.removeAll()
+        queuedCount = 0
         connectionTask?.cancel()
         // USB and Wi-Fi are two routes to the same bar. Retain ownership of
         // our busy session so a later mic-off can still clear it. Editing the
@@ -684,11 +690,15 @@ final class AppState {
             lastError = "Stop the arcade before drawing another item."
             return
         }
+        let endpoint = client.snapshot()
+        let revision = connectionRevision
         Task {
             do {
-                try await client.drawCountdown(to: date, colorHex: "#FFAA00FF", timeout: 0, priority: 95)
+                try await endpoint.drawCountdown(to: date, colorHex: "#FFAA00FF", timeout: 0, priority: 95)
+                guard revision == connectionRevision else { return }
                 lastError = nil
             } catch {
+                guard revision == connectionRevision else { return }
                 lastError = error.localizedDescription
             }
         }
@@ -804,15 +814,20 @@ final class AppState {
         let bundle = bundleID.lowercased()
         let ledColor = Self.ledColors.first { bundle.contains($0.match) }?.hex ?? "#FFFFFFFF"
         let chime = notificationChime
+        let endpoint = client.snapshot()
+        let revision = connectionRevision
         Task {
             do {
-                try await client.drawText(ascii, font: .normal, colorHex: "#FFFFFFFF", timeout: 20, priority: 95, ledColor: ledColor)
+                try await endpoint.drawText(ascii, font: .normal, colorHex: "#FFFFFFFF", timeout: 20, priority: 95, ledColor: ledColor)
+                guard revision == connectionRevision else { return }
                 if chime {
-                    try? await client.playSound(stockPath: "shared/calendar_event_starts.snd")
+                    try? await endpoint.playSound(stockPath: "shared/calendar_event_starts.snd")
                 }
+                guard revision == connectionRevision else { return }
                 log.info("notification drawn on bar (\(ascii.count) chars)")
                 lastError = nil
             } catch {
+                guard revision == connectionRevision else { return }
                 log.error("notification draw failed: \(error.localizedDescription, privacy: .public)")
                 lastError = error.localizedDescription
             }
@@ -825,10 +840,19 @@ final class AppState {
         queuedNotifications.removeAll()
         queuedCount = 0
         log.info("flushing \(queued.count) queued notifications")
-        Task {
+        notificationReplayTask?.cancel()
+        let endpoint = client.snapshot()
+        let revision = connectionRevision
+        notificationReplayTask = Task { [weak self] in
             for (index, text) in queued.enumerated() {
+                guard let self, !Task.isCancelled, revision == self.connectionRevision else { return }
+                if self.onCall {
+                    self.queuedNotifications = Array((Array(queued[index...]) + self.queuedNotifications).suffix(5))
+                    self.queuedCount = self.queuedNotifications.count
+                    return
+                }
                 let label = queued.count > 1 ? "[\(index + 1)/\(queued.count)] \(text)" : text
-                try? await client.drawText(label, font: .normal, colorHex: "#FFFFFFFF", timeout: 12, priority: 95, ledColor: "#FFFFFFFF")
+                try? await endpoint.drawText(label, font: .normal, colorHex: "#FFFFFFFF", timeout: 12, priority: 95, ledColor: "#FFFFFFFF")
                 if index < queued.count - 1 {
                     try? await Task.sleep(for: .seconds(13))
                 }

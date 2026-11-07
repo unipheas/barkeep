@@ -25,4 +25,18 @@ if [ ! -d "$APP" ]; then
 fi
 
 codesign --verify --deep --strict --verbose=2 "$APP"
+plutil -lint "$APP/Contents/Info.plist"
+bundle_id="$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$APP/Contents/Info.plist")"
+bundle_executable="$(/usr/libexec/PlistBuddy -c 'Print CFBundleExecutable' "$APP/Contents/Info.plist")"
+if [[ "$bundle_id" != dev.barkeep.mac || "$bundle_executable" != BarKeep || ! -x "$APP/Contents/MacOS/BarKeep" ]]; then
+    echo 'Release archive has an invalid app identity or missing executable' >&2
+    exit 65
+fi
+for resource in AppIcon.icns THIRD_PARTY_NOTICES.md; do
+    if [[ ! -s "$APP/Contents/Resources/$resource" ]]; then
+        echo "Release archive is missing $resource" >&2
+        exit 65
+    fi
+done
+lipo -archs "$APP/Contents/MacOS/BarKeep"
 echo "Verified extracted release app: $APP"

@@ -33,11 +33,7 @@ jobs:
         with:
           name: swift-coverage
           path: .build/**/codecov/*.json
-      - name: Build
-        run: swift build -c release
-      - name: Package app bundle
+      - name: Package and verify a local validation archive
         run: |
-          # make-app.sh signs and launches; in CI just verify the bundle assembles.
-          swift build -c release
-          mkdir -p dist/BarKeep.app/Contents/MacOS
-          cp .build/release/BarKeep dist/BarKeep.app/Contents/MacOS/
+          version=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' packaging/Info.plist)
+          ./scripts/package-release.sh "${version}-local-validation"

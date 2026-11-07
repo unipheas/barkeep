@@ -22,5 +22,12 @@ jobs:
         run: swift test --enable-code-coverage
       - name: Enforce complete Swift coverage for production release
         run: python3 scripts/check-coverage.py "$(swift test --show-codecov-path)" --minimum 100
-      - name: Test agent tools
-        run: python3 -m unittest discover -s Tests/Python
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Enforce complete agent tool coverage
+        run: |
+          python3 -m venv /tmp/barkeep-release-tests
+          /tmp/barkeep-release-tests/bin/pip install coverage==7.17.2
+          /tmp/barkeep-release-tests/bin/python -m coverage run --source=mcp,hooks -m unittest discover -s Tests/Python
+          /tmp/barkeep-release-tests/bin/python -m coverage report --fail-under=100

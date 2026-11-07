@@ -5,6 +5,30 @@ import XCTest
 final class IntegrationTests: XCTestCase {
     override func tearDown() { HTTPStub.handler = nil }
 
+    func testSlackTransactionsStayOrderedAndPinCredentials() async {
+        let slack = SlackSync(session:HTTPStub.session())
+        slack.token = "first-fixture-token"
+        let started = expectation(description:"First profile update pending")
+        let release = DispatchSemaphore(value:0)
+        let lock = NSLock()
+        var requests: [URLRequest] = []
+        HTTPStub.handler = { request in
+            let index = lock.withLock { requests.append(request); return requests.count }
+            if index == 1 { started.fulfill(); _ = release.wait(timeout:.now()+5) }
+            return (200,Data(#"{"ok":true}"#.utf8))
+        }
+        defer { release.signal(); HTTPStub.handler = nil }
+        let busy = Task { await slack.setBusy(true) }
+        await fulfillment(of:[started],timeout:2)
+        slack.token = "second-fixture-token"
+        let clear = Task { await slack.setBusy(false) }
+        release.signal()
+        let busyError = await busy.value, clearError = await clear.value
+        XCTAssertNil(busyError); XCTAssertNil(clearError)
+        XCTAssertEqual(requests.map { $0.url!.lastPathComponent },["users.profile.set","dnd.setSnooze","users.profile.set","dnd.endSnooze"])
+        XCTAssertEqual(requests.map { $0.value(forHTTPHeaderField:"Authorization") },["Bearer first-fixture-token","Bearer first-fixture-token","Bearer second-fixture-token","Bearer second-fixture-token"])
+    }
+
     func testSlackBusyAndClearUseExpectedScopesAndPayloads() async throws {
         let slack = SlackSync(session: HTTPStub.session())
         let empty = await slack.setBusy(true); XCTAssertNil(empty)
