@@ -52,6 +52,10 @@ struct CompactSecureField: NSViewRepresentable {
 
 @MainActor
 struct MenuView: View {
+    #if DEBUG
+    // Hosted tests observe real tab State and lifecycle cancellation.
+    internal var didAppear: ((Self) -> Void)?
+    #endif
     @Environment(AppState.self) private var state
     @State private var tab = 0
     @State private var contentSize = CGSize.zero
@@ -106,6 +110,9 @@ struct MenuView: View {
         .background(MenuBarWindowSizer(contentSize: contentSize))
         .task { await state.refreshDeviceStatus() }
         .task { await state.previewLoop() }
+        #if DEBUG
+        .onAppear { didAppear?(self) }
+        #endif
     }
 
     private var header: some View {
@@ -423,6 +430,11 @@ struct DeviceTab: View {
 struct MessageTab: View {
     @Environment(AppState.self) private var state
 
+    #if DEBUG
+    // Inspect the installed view in hosted tests so private State uses real storage.
+    internal var didAppear: ((Self) -> Void)?
+    #endif
+
     @State private var message = ""
     @State private var font: TextFont = .normal
     @State private var color = Color.white
@@ -462,6 +474,9 @@ struct MessageTab: View {
                 Button("Clear Display") { state.clearDisplay() }
             }
         }
+        #if DEBUG
+        .onAppear { didAppear?(self) }
+        #endif
     }
 
     @Environment(\.openWindow) private var openWindow

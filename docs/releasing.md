@@ -83,7 +83,18 @@ changing keychain access permissions. A passing check verifies prerequisites;
 it does not mean the new build has been notarized.
 The full-source Swift coverage gate is not yet satisfied for the firmware 1.3.1
 update. Do not release it until that gate passes. Use a Python environment with
-coverage 7.17.2 for the commands above. Interactive checks and opt-in hardware
+coverage 7.17.2 for the commands above. On Nova, the default Xcode `python3`
+may be Python 3.9, which cannot install that coverage version. Use the installed
+Homebrew Python 3.13 in an isolated virtual environment, install
+`coverage==7.17.2` there, and activate it before running the Python commands.
+Do not change the system Python or install test dependencies globally.
+
+Hosted SwiftUI interaction tests use DEBUG-only `didAppear` callbacks to inspect
+installed State. They verify UI behavior against isolated defaults and mocked
+transports; they are not evidence of physical-device or system-permission tests.
+The callbacks are absent from release builds.
+
+Interactive checks and opt-in hardware
 tests are documented in `docs/device-api-coverage.md`; mock Slack and calendar
 tests do not establish real-account integration results.
 

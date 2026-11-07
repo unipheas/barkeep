@@ -5,6 +5,11 @@ import SwiftUI
 struct CanvasView: View {
     @Environment(AppState.self) private var state
 
+    #if DEBUG
+    // Hosted tests observe installed State without changing release behavior.
+    internal var didAppear: ((Self) -> Void)?
+    #endif
+
     static let columns = BusyBarClient.displayWidth
     static let rows = BusyBarClient.displayHeight
 
@@ -69,6 +74,9 @@ struct CanvasView: View {
             width: CGFloat(Self.columns) * cellSize + 32,
             height: CGFloat(Self.rows) * cellSize + 140
         )
+        #if DEBUG
+        .onAppear { didAppear?(self) }
+        #endif
     }
 
     private var canvas: some View {

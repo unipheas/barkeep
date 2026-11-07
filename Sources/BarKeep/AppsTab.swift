@@ -24,6 +24,10 @@ struct AppsTab: View {
 
 @MainActor
 struct AppsContent: View {
+    #if DEBUG
+    // Hosted tests inspect installed State rather than constant unhosted bindings.
+    internal var didAppear: ((Self) -> Void)?
+    #endif
     @Bindable var model: DeviceAppsModel
     @State private var removing: DeviceApp?
 
@@ -103,6 +107,9 @@ struct AppsContent: View {
         .sheet(isPresented: Binding(get: { model.settingsApp != nil }, set: { if !$0 { model.closeSettings() } })) {
             AppSettingsSheet(model: model)
         }
+        #if DEBUG
+        .onAppear { didAppear?(self) }
+        #endif
     }
 
     private func choosePackage() {
