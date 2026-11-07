@@ -8,6 +8,9 @@ on:
 jobs:
   build:
     runs-on: macos-15
+    env:
+      # ViewInspector 0.10.5 references SDK 26 types; retain macOS 15 runtime testing.
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
       - name: Show runner and Swift toolchain
@@ -16,13 +19,30 @@ jobs:
           sw_vers
           xcodebuild -version
           swift --version
-      - name: Test
-        run: swift test
-      - name: Build
-        run: swift build -c release
-      - name: Package app bundle
+      - name: Install acceptance project generator
+        run: brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
+      - name: Enforce complete Swift coverage and app acceptance
+        run: python3 scripts/test-full-coverage.py --with-login-item-test
+      - name: Preserve Swift coverage and acceptance diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: swift-coverage-and-acceptance
+          path: coverage-artifacts/
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Test agent tools and CLI
         run: |
-          # make-app.sh signs and launches; in CI just verify the bundle assembles.
-          swift build -c release
-          mkdir -p dist/BarKeep.app/Contents/MacOS
-          cp .build/release/BarKeep dist/BarKeep.app/Contents/MacOS/
+          python3 -m venv /tmp/barkeep-test-env
+          /tmp/barkeep-test-env/bin/pip install coverage==7.17.2
+          /tmp/barkeep-test-env/bin/python -m coverage run --source=mcp,hooks -m unittest discover -s Tests/Python
+          /tmp/barkeep-test-env/bin/python -m coverage report --fail-under=100
+      - uses: actions/upload-artifact@v4
+        with:
+          name: swift-coverage
+          path: .build/**/codecov/*.json
+      - name: Package and verify a local validation archive
+        run: |
+          version=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' packaging/Info.plist)
+          ./scripts/package-release.sh "${version}-local-validation"

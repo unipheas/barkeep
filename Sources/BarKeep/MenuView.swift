@@ -52,6 +52,11 @@ struct CompactSecureField: NSViewRepresentable {
 
 @MainActor
 struct MenuView: View {
+    @Environment(\.openURL) private var openURL
+    #if DEBUG
+    // Hosted tests observe real tab State and lifecycle cancellation.
+    internal var didAppear: ((Self) -> Void)?
+    #endif
     @Environment(AppState.self) private var state
     @State private var tab = 0
     @State private var contentSize = CGSize.zero
@@ -64,6 +69,7 @@ struct MenuView: View {
                 Text("Message").tag(1)
                 Text("Timers").tag(2)
                 Text("Arcade").tag(3)
+                Text("Apps").tag(5)
                 Text("Settings").tag(4)
             }
             .pickerStyle(.segmented)
@@ -74,7 +80,8 @@ struct MenuView: View {
             case 1: MessageTab()
             case 2: TimersTab()
             case 3: ArcadeTab()
-            default: SettingsTab()
+            case 5: AppsTab()
+            default: ScrollView { SettingsTab() }.frame(height: 500)
             }
 
             if let error = state.lastError {
@@ -104,6 +111,9 @@ struct MenuView: View {
         .background(MenuBarWindowSizer(contentSize: contentSize))
         .task { await state.refreshDeviceStatus() }
         .task { await state.previewLoop() }
+        #if DEBUG
+        .onAppear { didAppear?(self) }
+        #endif
     }
 
     private var header: some View {
@@ -131,12 +141,13 @@ struct MenuView: View {
             }
             Button {
                 if let url = BusyBarClient.webInterfaceURL(for: state.host) {
-                    NSWorkspace.shared.open(url)
+                    openURL(url)
                 }
             } label: {
                 Image(systemName: "globe")
             }
             .buttonStyle(.borderless)
+            .accessibilityLabel("Open Busy Bar web interface")
             .help("Open the bar's web interface (http://\(BusyBarClient.normalizedHost(state.host)))")
             Button {
                 NSApp.terminate(nil)
@@ -144,6 +155,7 @@ struct MenuView: View {
                 Image(systemName: "power")
             }
             .buttonStyle(.borderless)
+            .accessibilityLabel("Quit BarKeep")
             .help("Quit BarKeep")
         }
     }
@@ -345,6 +357,14 @@ struct DeviceTab: View {
 
             Divider()
 
+            if state.widgetsPausedForApp {
+                HStack {
+                    Text("Widgets paused for device app").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Resume") { state.resumeWidgets() }.controlSize(.small)
+                }
+            }
+
             LabeledContent("Brightness") {
                 Picker("", selection: Binding(
                     get: { state.brightnessValue },
@@ -411,6 +431,11 @@ struct DeviceTab: View {
 struct MessageTab: View {
     @Environment(AppState.self) private var state
 
+    #if DEBUG
+    // Inspect the installed view in hosted tests so private State uses real storage.
+    internal var didAppear: ((Self) -> Void)?
+    #endif
+
     @State private var message = ""
     @State private var font: TextFont = .normal
     @State private var color = Color.white
@@ -450,6 +475,9 @@ struct MessageTab: View {
                 Button("Clear Display") { state.clearDisplay() }
             }
         }
+        #if DEBUG
+        .onAppear { didAppear?(self) }
+        #endif
     }
 
     @Environment(\.openWindow) private var openWindow
@@ -471,6 +499,7 @@ struct MessageTab: View {
                     Text("😀")
                 }
                 .buttonStyle(.borderless)
+                .accessibilityLabel("Insert emoji")
                 .help("Insert emoji")
                 Button {
                     showColorPicker.toggle()
@@ -482,6 +511,7 @@ struct MessageTab: View {
                         .frame(width: 16, height: 16)
                 }
                 .buttonStyle(.borderless)
+                .accessibilityLabel("Message color")
                 .help("Message color")
             }
             if showColorPicker {
@@ -497,6 +527,7 @@ struct MessageTab: View {
                                 .frame(width: 18, height: 18)
                         }
                         .buttonStyle(.borderless)
+                        .accessibilityLabel(preset.name)
                         .help(preset.name)
                     }
                 }
@@ -554,6 +585,8 @@ struct MessageTab: View {
                         Image(systemName: "minus.circle")
                     }
                     .buttonStyle(.borderless)
+                    .accessibilityLabel("Remove preset: \(preset.text)")
+                    .help("Remove preset")
                 }
             }
             Button {
@@ -756,6 +789,8 @@ struct ConnectionSettings: View {
 
 @MainActor
 struct SettingsTab: View {
+    @Environment(\.openURL) private var openURL
+    @Environment(\.openWindow) private var openWindow
     @Environment(AppState.self) private var state
     @State private var launchAtLogin = false
     @State private var weatherQuery = ""
@@ -825,6 +860,13 @@ struct SettingsTab: View {
                 .foregroundStyle(.secondary)
 
             Divider()
+            Button("All Device Controls…") {
+                openWindow(id: "device-tools")
+                NSApp.activate(ignoringOtherApps: true)
+            }
+            Text("Wi-Fi, Bluetooth, storage, firmware, Matter, time and more.")
+                .font(.caption2).foregroundStyle(.secondary)
+            Divider()
             Text("Slack").font(.subheadline.bold())
             Toggle("Sync Slack status when busy", isOn: $state.slackSyncEnabled)
             if state.slackSyncEnabled {
@@ -872,7 +914,7 @@ struct SettingsTab: View {
                     .foregroundStyle(.orange)
                 Button("Open Full Disk Access Settings…") {
                     if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
-                        NSWorkspace.shared.open(url)
+                        openURL(url)
                     }
                 }
                 .font(.caption)

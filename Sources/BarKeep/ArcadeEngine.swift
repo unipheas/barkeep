@@ -214,7 +214,8 @@ private struct SnakeState: Sendable {
     }
 }
 
-private struct TetrisState: Sendable {
+// Internal pure state permits deterministic gameplay fixtures without OS or device access.
+struct TetrisState: Sendable {
     private static let shapes: [[UInt16]] = [
         [0x0F00, 0x2222, 0x00F0, 0x4444],
         [0x8E00, 0x6440, 0x0E20, 0x44C0],
@@ -230,12 +231,12 @@ private struct TetrisState: Sendable {
         .orange, .yellow, .green, .magenta, .red,
     ]
 
-    private var board = Array(repeating: Array(repeating: 0, count: 10), count: 16)
-    private var piece = 0
-    private var rotation = 0
-    private var position = ArcadePoint(x: 3, y: -1)
-    private var lastTick: TimeInterval = 0
-    private var score = 0
+    private(set) var board = Array(repeating: Array(repeating: 0, count: 10), count: 16)
+    private(set) var piece = 0
+    private(set) var rotation = 0
+    private(set) var position = ArcadePoint(x: 3, y: -1)
+    private(set) var lastTick: TimeInterval = 0
+    private(set) var score = 0
 
     mutating func reset() {
         board = Array(repeating: Array(repeating: 0, count: 10), count: 16)
@@ -369,15 +370,16 @@ private struct TetrisState: Sendable {
     }
 }
 
-private struct PongState: Sendable {
-    private var ballX = Double(ArcadeFrame.width / 2)
-    private var ballY = Double(ArcadeFrame.height / 2)
-    private var velocityX = 0.55
-    private var velocityY = 0.28
-    private var paddle = 6
-    private var computer = 6
-    private var playerScore = 0
-    private var computerScore = 0
+// Internal pure state permits deterministic gameplay fixtures without OS or device access.
+struct PongState: Sendable {
+    private(set) var ballX = Double(ArcadeFrame.width / 2)
+    private(set) var ballY = Double(ArcadeFrame.height / 2)
+    private(set) var velocityX = 0.55
+    private(set) var velocityY = 0.28
+    private(set) var paddle = 6
+    private(set) var computer = 6
+    private(set) var playerScore = 0
+    private(set) var computerScore = 0
 
     mutating func reset() {
         paddle = 6
@@ -448,14 +450,15 @@ private struct PongState: Sendable {
     }
 }
 
-private struct BreakoutState: Sendable {
-    private var ballX = Double(ArcadeFrame.width / 2)
-    private var ballY = Double(ArcadeFrame.height - 4)
-    private var velocityX = 0.45
-    private var velocityY = -0.32
-    private var paddle = ArcadeFrame.width / 2 - 6
-    private var bricks = Array(repeating: Array(repeating: true, count: 12), count: 4)
-    private var remaining = 48
+// Internal pure state permits deterministic gameplay fixtures without OS or device access.
+struct BreakoutState: Sendable {
+    private(set) var ballX = Double(ArcadeFrame.width / 2)
+    private(set) var ballY = Double(ArcadeFrame.height - 4)
+    private(set) var velocityX = 0.45
+    private(set) var velocityY = -0.32
+    private(set) var paddle = ArcadeFrame.width / 2 - 6
+    private(set) var bricks = Array(repeating: Array(repeating: true, count: 12), count: 4)
+    private(set) var remaining = 48
 
     mutating func reset() {
         paddle = ArcadeFrame.width / 2 - 6

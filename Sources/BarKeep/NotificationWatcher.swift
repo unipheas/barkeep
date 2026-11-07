@@ -29,6 +29,10 @@ final class NotificationWatcher: @unchecked Sendable {
         darwinUserDir().map { $0 + "com.apple.notificationcenter/db2/db" },
     ].compactMap { $0 }
 
+    private let paths: [String]
+
+    init(paths: [String]? = nil) { self.paths = paths ?? Self.candidatePaths }
+
     private let queue = DispatchQueue(label: "busybar.notificationwatcher")
     private var timer: DispatchSourceTimer?
     private var db: OpaquePointer?
@@ -65,7 +69,7 @@ final class NotificationWatcher: @unchecked Sendable {
         }
     }
 
-    private func poll() {
+    func poll() {
         guard ensureOpen() else { return }
         guard let db else { return }
 
@@ -126,7 +130,7 @@ final class NotificationWatcher: @unchecked Sendable {
 
     private func ensureOpen() -> Bool {
         if db != nil { return true }
-        for path in Self.candidatePaths where FileManager.default.fileExists(atPath: path) || path.contains("usernoted") {
+        for path in paths where FileManager.default.fileExists(atPath: path) || path.contains("usernoted") {
             var handle: OpaquePointer?
             let rc = sqlite3_open_v2(path, &handle, SQLITE_OPEN_READONLY, nil)
             // sqlite defers real I/O; force a read so TCC denial surfaces here.

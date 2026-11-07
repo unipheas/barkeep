@@ -1,6 +1,22 @@
 import Foundation
 import CoreAudio
 
+/// CoreAudio boundary for deterministic device-add/remove and read-failure tests.
+struct AudioHardwareCalls {
+    var size: (AudioObjectID, inout AudioObjectPropertyAddress, inout UInt32) -> OSStatus = {
+        AudioObjectGetPropertyDataSize($0, &$1, 0, nil, &$2)
+    }
+    var read: (AudioObjectID, inout AudioObjectPropertyAddress, inout UInt32, UnsafeMutableRawPointer) -> OSStatus = {
+        AudioObjectGetPropertyData($0, &$1, 0, nil, &$2, $3)
+    }
+    var add: (AudioObjectID, inout AudioObjectPropertyAddress, DispatchQueue, @escaping AudioObjectPropertyListenerBlock) -> OSStatus = {
+        AudioObjectAddPropertyListenerBlock($0, &$1, $2, $3)
+    }
+    var remove: (AudioObjectID, inout AudioObjectPropertyAddress, DispatchQueue, @escaping AudioObjectPropertyListenerBlock) -> OSStatus = {
+        AudioObjectRemovePropertyListenerBlock($0, &$1, $2, $3)
+    }
+}
+
 /// Watches every audio input device and reports whether any of them is
 /// actively capturing (`kAudioDevicePropertyDeviceIsRunningSomewhere`).
 /// This flips to true when Teams, Zoom, FaceTime, etc. open the mic —
@@ -16,6 +32,7 @@ final class MicMonitor {
     private(set) var isMicInUse = false
     private(set) var activeDeviceNames: [String] = []
 
+    private let hardware: AudioHardwareCalls
     private let queue = DispatchQueue(label: "busybar.micmonitor")
     private var watchedDevices: Set<AudioObjectID> = []
     private var runningListener: AudioObjectPropertyListenerBlock?
@@ -32,7 +49,10 @@ final class MicMonitor {
         mElement: kAudioObjectPropertyElementMain
     )
 
+    init(hardware: AudioHardwareCalls = AudioHardwareCalls()) { self.hardware = hardware }
+
     func start() {
+        guard devicesListener == nil else { return }
         let running: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
             self?.queue.async { self?.evaluate() }
         }
@@ -41,25 +61,22 @@ final class MicMonitor {
         }
         runningListener = running
         devicesListener = devices
-        AudioObjectAddPropertyListenerBlock(
-            AudioObjectID(kAudioObjectSystemObject), &devicesAddress, queue, devices
-        )
+        _ = hardware.add(AudioObjectID(kAudioObjectSystemObject), &devicesAddress, queue, devices)
         queue.async { self.rebuildWatchList() }
     }
 
     func stop() {
         queue.sync {
             if let devices = devicesListener {
-                AudioObjectRemovePropertyListenerBlock(
-                    AudioObjectID(kAudioObjectSystemObject), &devicesAddress, queue, devices
-                )
+                _ = hardware.remove(AudioObjectID(kAudioObjectSystemObject), &devicesAddress, queue, devices)
             }
             if let running = runningListener {
                 for device in watchedDevices {
-                    AudioObjectRemovePropertyListenerBlock(device, &runningAddress, queue, running)
+                    _ = hardware.remove(device, &runningAddress, queue, running)
                 }
             }
             watchedDevices.removeAll()
+            runningListener = nil; devicesListener = nil
         }
     }
 
@@ -67,21 +84,19 @@ final class MicMonitor {
         guard let running = runningListener else { return }
         let inputs = Set(allInputDevices())
         for device in watchedDevices.subtracting(inputs) {
-            AudioObjectRemovePropertyListenerBlock(device, &runningAddress, queue, running)
+            _ = hardware.remove(device, &runningAddress, queue, running)
         }
         for device in inputs.subtracting(watchedDevices) {
-            AudioObjectAddPropertyListenerBlock(device, &runningAddress, queue, running)
+            _ = hardware.add(device, &runningAddress, queue, running)
         }
         watchedDevices = inputs
         evaluate()
     }
 
     private func evaluate() {
-        let names = watchedDevices
-            .filter { isRunningSomewhere($0) }
-            .compactMap { deviceName($0) }
-            .sorted()
-        let activity = Activity(isInUse: !names.isEmpty, deviceNames: names)
+        let running = watchedDevices.filter { isRunningSomewhere($0) }
+        let names = running.map { deviceName($0) ?? "Microphone" }.sorted()
+        let activity = Activity(isInUse: !running.isEmpty, deviceNames: names)
         guard activity != Activity(isInUse: isMicInUse, deviceNames: activeDeviceNames) else { return }
         isMicInUse = activity.isInUse
         activeDeviceNames = activity.deviceNames
@@ -92,15 +107,11 @@ final class MicMonitor {
     private func allInputDevices() -> [AudioObjectID] {
         var size: UInt32 = 0
         var address = devicesAddress
-        guard AudioObjectGetPropertyDataSize(
-            AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size
-        ) == noErr else { return [] }
+        guard hardware.size(AudioObjectID(kAudioObjectSystemObject), &address, &size) == noErr else { return [] }
 
         let count = Int(size) / MemoryLayout<AudioObjectID>.size
         var ids = [AudioObjectID](repeating: 0, count: count)
-        guard AudioObjectGetPropertyData(
-            AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &ids
-        ) == noErr else { return [] }
+        guard hardware.read(AudioObjectID(kAudioObjectSystemObject), &address, &size, &ids) == noErr else { return [] }
 
         return ids.filter {
             inputStreamCount($0) > 0
@@ -125,7 +136,7 @@ final class MicMonitor {
             mElement: kAudioObjectPropertyElementMain
         )
         var size: UInt32 = 0
-        guard AudioObjectGetPropertyDataSize(device, &address, 0, nil, &size) == noErr else { return 0 }
+        guard hardware.size(device, &address, &size) == noErr else { return 0 }
         return Int(size) / MemoryLayout<AudioStreamID>.size
     }
 
@@ -133,7 +144,7 @@ final class MicMonitor {
         var address = runningAddress
         var value: UInt32 = 0
         var size = UInt32(MemoryLayout<UInt32>.size)
-        guard AudioObjectGetPropertyData(device, &address, 0, nil, &size, &value) == noErr else { return false }
+        guard hardware.read(device, &address, &size, &value) == noErr else { return false }
         return value != 0
     }
 
@@ -153,7 +164,7 @@ final class MicMonitor {
         )
         var value: UInt32 = 0
         var size = UInt32(MemoryLayout<UInt32>.size)
-        guard AudioObjectGetPropertyData(device, &address, 0, nil, &size, &value) == noErr else {
+        guard hardware.read(device, &address, &size, &value) == noErr else {
             return nil
         }
         return value
@@ -167,7 +178,7 @@ final class MicMonitor {
         )
         var name: Unmanaged<CFString>?
         var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
-        guard AudioObjectGetPropertyData(device, &address, 0, nil, &size, &name) == noErr,
+        guard hardware.read(device, &address, &size, &name) == noErr,
               let name else {
             return nil
         }

@@ -79,7 +79,7 @@ enum MessageRenderer {
     static func renderGridToPNG(_ grid: [[String?]]) -> Data? {
         let height = grid.count
         let width = grid.first?.count ?? 0
-        guard width > 0, height > 0 else { return nil }
+        guard width > 0, height > 0, grid.allSatisfy({ $0.count == width }) else { return nil }
 
         guard let rep = NSBitmapImageRep(
             bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height,
@@ -109,7 +109,7 @@ enum MessageRenderer {
     }
 
     static func rgbaHex(from color: NSColor) -> String {
-        let rgb = color.usingColorSpace(.deviceRGB) ?? .white
+        let rgb = color.usingColorSpace(.deviceRGB) ?? NSColor(deviceRed: 1, green: 1, blue: 1, alpha: 1)
         return String(
             format: "#%02X%02X%02X%02X",
             Int(round(rgb.redComponent * 255)),

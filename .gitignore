@@ -14,3 +14,10 @@ PUBLISHING.md
 *.p12
 *.pem
 *.mobileprovision
+__pycache__/
+.coverage
+.coverage.*
+coverage/
+
+# Whole-source coverage reports and native acceptance diagnostics
+coverage-artifacts/

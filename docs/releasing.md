@@ -3,7 +3,7 @@
 BarKeep ships a Developer ID signed, notarized ZIP through GitHub Releases.
 The Homebrew cask is `unipheas/barkeep/barkeep`, maintained in
 [`unipheas/homebrew-barkeep`](https://github.com/unipheas/homebrew-barkeep/blob/main/Casks/barkeep.rb).
-Creating a tag only runs Swift tests; it does not sign or publish the app.
+Creating a tag runs validation; it does not sign or publish the app.
 
 ## One-time local setup (requires explicit credential-action approval)
 
@@ -53,11 +53,17 @@ password prompt and explicit keychain location.
 
 ## Build and verify each release
 
+Use Xcode 26 or newer for the test-only ViewInspector dependency. CI explicitly
+selects Xcode 26.3 on the macOS 15 runner; the app deployment target remains
+macOS 14.
+
 Start from the merged, passing main commit, preserve local edits, and verify
 that the intended version/tag/release does not already exist. Use the version in `packaging/Info.plist` and verify it matches the intended release.
 
 ```sh
-swift test
+python3 scripts/test-full-coverage.py --with-login-item-test
+python3 -m coverage run --source=mcp,hooks -m unittest discover -s Tests/Python
+python3 -m coverage report --fail-under=100
 swift build -c release
 ./scripts/release-on-nova.sh --check
 ./scripts/release-on-nova.sh
@@ -69,6 +75,27 @@ hardened runtime/timestamp, submits to Apple, staples the ticket, checks
 Gatekeeper acceptance, creates the final ZIP and verifies a fresh extraction.
 The wrapper does not generate or store credentials, create tags, or publish.
 A `*-local-validation.zip` or ad-hoc build is never a production release asset.
+If SSH reports `keychainLocked` after the owner has unlocked the login keychain,
+run the prerequisite check and release wrapper in Nova’s local Terminal session.
+The local session can access the existing credentials without exporting keys or
+changing keychain access permissions. A passing check verifies prerequisites;
+it does not mean the new build has been notarized.
+The full-source Swift coverage gate must pass on the intended release source
+snapshot. A past report does not authorize releasing a changed source tree. Use a Python environment with
+coverage 7.17.2 for the commands above. On Nova, the default Xcode `python3`
+may be Python 3.9, which cannot install that coverage version. Use the installed
+Homebrew Python 3.13 in an isolated virtual environment, install
+`coverage==7.17.2` there, and activate it before running the Python commands.
+Do not change the system Python or install test dependencies globally.
+
+Hosted SwiftUI interaction tests use DEBUG-only `didAppear` callbacks to inspect
+installed State. They verify UI behavior against isolated defaults and mocked
+transports; they are not evidence of physical-device or system-permission tests.
+The callbacks are absent from release builds.
+
+Interactive checks and opt-in hardware
+tests are documented in `docs/device-api-coverage.md`; mock Slack and calendar
+tests do not establish real-account integration results.
 
 ## Publish and make the release available through Homebrew
 
@@ -90,5 +117,11 @@ A `*-local-validation.zip` or ad-hoc build is never a production release asset.
    brew update
    brew upgrade --cask unipheas/barkeep/barkeep
    ```
+
+When updating the companion `barkeep-cli` formula, retain the entire `hooks`
+directory (including `agent_hook.py`) and `mcp/barkeep_mcp.py`. Its smoke test
+should run `barkeep --help` successfully; invoking the argparse CLI without a
+command exits with usage status 2. Verify the cask's architecture declaration
+matches the executable reported by `lipo -archs` before publishing.
 
 Do not operate on the user's work computer as part of publication.

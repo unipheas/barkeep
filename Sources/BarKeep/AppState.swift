@@ -20,7 +20,10 @@ final class AppState {
 
     private var connection: DeviceConnection
     private let defaults: UserDefaults
-    private var connectionRevision = 0
+    private let weatherSession: URLSession
+    private let loginItems: LoginItemService
+    private let renderMessage: (String, String) -> Data?
+    private(set) var connectionRevision = 0
     private var connectionTask: Task<Void, Never>?
     private(set) var isConnecting = false
 
@@ -82,9 +85,11 @@ final class AppState {
             if calendarAutoBusy {
                 Task {
                     _ = await calendarMonitor.requestAccess()
+                    guard calendarAutoBusy else { calendarMonitor.stop(); return }
                     calendarChanged()
                 }
             } else {
+                calendarMonitor.stop()
                 syncAutoBusy()
             }
         }
@@ -155,6 +160,14 @@ final class AppState {
     private(set) var notificationStatus: NotificationWatcher.Status = .stopped
     private(set) var brightnessValue = "auto"
     private(set) var volumeValue = 100
+    private var confirmedBrightnessValue = "auto"
+    private var confirmedVolumeValue = 100
+    private var brightnessWriteSequence = 0
+    private var volumeWriteSequence = 0
+    private var brightnessMutationRevision = 0
+    private var volumeMutationRevision = 0
+    private var brightnessWriteTask: Task<Void, Never>?
+    private var volumeWriteTask: Task<Void, Never>?
     private(set) var transportType = "usb"
     private(set) var wifiStateText = "unknown"
     var deviceNameText = ""
@@ -165,11 +178,10 @@ final class AppState {
     private(set) var nextMeetingTitle: String?
     private(set) var nextMeetingDate: Date?
     var launchAtLogin: Bool {
-        get { SMAppService.mainApp.status == .enabled }
+        get { loginItems.isEnabled() }
         set {
             do {
-                if newValue { try SMAppService.mainApp.register() }
-                else { try SMAppService.mainApp.unregister() }
+                try loginItems.setEnabled(newValue)
             } catch {
                 lastError = error.localizedDescription
             }
@@ -179,20 +191,26 @@ final class AppState {
 
     let client: BusyBarClient
     let arcade: ArcadeController
-    private let localNetworkPermissionTrigger = LocalNetworkPermissionTrigger()
-    private let micMonitor = MicMonitor()
-    private let notificationWatcher = NotificationWatcher()
-    private let calendarMonitor = CalendarMonitor()
-    private let slackSync = SlackSync()
+    private let localNetworkPermissionTrigger: LocalNetworkPermissionTrigger
+    private let micMonitor: MicMonitor
+    private let notificationWatcher: NotificationWatcher
+    private let calendarMonitor: CalendarMonitor
+    private let slackSync: SlackSync
     private var offDebounceTask: Task<Void, Never>?
     private var pingTask: Task<Void, Never>?
     private(set) var latestPingMs: Double?
     private var weatherTask: Task<Void, Never>?
     private(set) var latestWeather: WeatherReading?
+    private(set) var widgetsPausedForApp = false
+    private var launchedDeviceAppID: String?
     private var lastWeatherIconEmoji: String?
     private var queuedNotifications: [String] = []
+    private var notificationReplayTask: Task<Void, Never>?
     /// True when this app started the busy session (so we only clear our own).
     private var weSetBusy = false
+    private var busyWriteTask: Task<Void, Never>?
+    private var busyWriteSequence = 0
+    private var busyMutationRevision = 0
 
     private static let ledColors: [(match: String, hex: String)] = [
         ("teams", "#7B83EBFF"),
@@ -201,10 +219,30 @@ final class AppState {
         ("mail", "#0078D4FF"),
     ]
 
-    init(defaults: UserDefaults = .standard, startServices: Bool = true, session: URLSession? = nil) {
+    init(
+        defaults: UserDefaults = .standard,
+        startServices: Bool = true,
+        session: URLSession? = nil,
+        slackSession: URLSession = .shared,
+        weatherSession: URLSession = .shared,
+        calendarSource: CalendarSource? = nil,
+        localNetworkPermissionTrigger: LocalNetworkPermissionTrigger? = nil,
+        micMonitor: MicMonitor? = nil,
+        notificationWatcher: NotificationWatcher? = nil,
+        arcadeKeyboard: (any ArcadeKeyboardCapturing)? = nil,
+        renderMessage: @escaping (String, String) -> Data? = MessageRenderer.renderToPNG,
+        loginItems: LoginItemService? = nil
+    ) {
         let connection = DeviceConnection(defaults: defaults)
         self.connection = connection
         self.defaults = defaults
+        self.weatherSession = weatherSession
+        self.renderMessage = renderMessage
+        self.loginItems = loginItems ?? .live
+        self.calendarMonitor = CalendarMonitor(source: calendarSource)
+        self.localNetworkPermissionTrigger = localNetworkPermissionTrigger ?? LocalNetworkPermissionTrigger()
+        self.micMonitor = micMonitor ?? MicMonitor()
+        self.notificationWatcher = notificationWatcher ?? NotificationWatcher()
         self.autoOnCall = defaults.object(forKey: "autoOnCall") as? Bool ?? true
         self.theme = defaults.string(forKey: "theme") ?? "on_air"
         self.triggerSmartHome = defaults.object(forKey: "triggerSmartHome") as? Bool ?? true
@@ -232,33 +270,34 @@ final class AppState {
         self.pingHost = defaults.string(forKey: "pingHost") ?? "1.1.1.1"
         self.weatherCelsius = defaults.bool(forKey: "weatherCelsius")
         self.client = BusyBarClient(host: connection.host, token: connection.token, session: session)
+        self.slackSync = SlackSync(session: slackSession)
         self.transportType = connection.mode.rawValue
-        self.arcade = ArcadeController(client: self.client)
+        self.arcade = ArcadeController(client: self.client, keyboard: arcadeKeyboard, defaults: defaults)
+        self.slackSync.token = self.slackToken
+        calendarMonitor.onChange = { [weak self] in self?.calendarChanged() }
         guard startServices else { return }
-        localNetworkPermissionTrigger.onAccessAvailable = { [weak self] in
+        self.localNetworkPermissionTrigger.onAccessAvailable = { [weak self] in
             Task { @MainActor [weak self] in
                 await self?.refreshDeviceStatus()
             }
         }
-        localNetworkPermissionTrigger.requestAccess()
-        slackSync.token = self.slackToken
+        self.localNetworkPermissionTrigger.requestAccess()
         syncPingLoop()
         syncWeatherLoop()
 
-        micMonitor.onChange = { [weak self] activity in
+        self.micMonitor.onChange = { [weak self] activity in
             Task { @MainActor in self?.micStateChanged(activity) }
         }
-        micMonitor.start()
+        self.micMonitor.start()
 
-        notificationWatcher.onNotification = { [weak self] note in
+        self.notificationWatcher.onNotification = { [weak self] note in
             Task { @MainActor [weak self] in self?.handleNotification(note) }
         }
-        notificationWatcher.onStatusChange = { [weak self] status in
+        self.notificationWatcher.onStatusChange = { [weak self] status in
             Task { @MainActor [weak self] in self?.notificationStatus = status }
         }
-        if forwardNotifications { notificationWatcher.start() }
+        if forwardNotifications { self.notificationWatcher.start() }
 
-        calendarMonitor.onChange = { [weak self] in self?.calendarChanged() }
         if calendarAutoBusy { calendarMonitor.start() }
 
         Task { await refreshDeviceStatus() }
@@ -267,9 +306,16 @@ final class AppState {
     // MARK: - Device status
 
     private func connectionChanged(resetBusyOwnership: Bool = false) {
+        busyWriteTask?.cancel(); busyWriteTask = nil
         if arcade.isActive { arcade.stop() }
         connection.save(to: defaults)
         connectionRevision += 1
+        brightnessWriteTask?.cancel(); brightnessWriteTask = nil
+        volumeWriteTask?.cancel(); volumeWriteTask = nil
+        notificationReplayTask?.cancel()
+        notificationReplayTask = nil
+        queuedNotifications.removeAll()
+        queuedCount = 0
         connectionTask?.cancel()
         // USB and Wi-Fi are two routes to the same bar. Retain ownership of
         // our busy session so a later mic-off can still clear it. Editing the
@@ -278,8 +324,8 @@ final class AppState {
             offDebounceTask?.cancel()
             weSetBusy = false
         }
-        client.host = connection.host
-        client.token = connection.token
+        client.configure(host: connection.host, token: connection.token)
+        if widgetsPausedForApp { resumeWidgets() }
         deviceReachable = false
         authenticationRejected = false
         isConnecting = false
@@ -302,6 +348,9 @@ final class AppState {
         // Snapshot the endpoint so an in-flight refresh cannot mix USB and Wi-Fi
         // responses or overwrite the newly selected connection's state.
         let endpoint = client.snapshot()
+        let brightnessRevision = brightnessMutationRevision
+        let volumeRevision = volumeMutationRevision
+        let busyRevision = busyMutationRevision
         isConnecting = true
         defer { if revision == connectionRevision { isConnecting = false } }
         do {
@@ -313,7 +362,9 @@ final class AppState {
             firmwareVersion = status.firmware.version
             let busyType = try await endpoint.currentBusyType()
             guard revision == connectionRevision, !Task.isCancelled else { return }
-            onCall = busyType != "NOT_STARTED"
+            if busyRevision == busyMutationRevision {
+                onCall = busyType != "NOT_STARTED"
+            }
             if onCall, arcade.isActive { arcade.stop() }
             let themes = try? await endpoint.listThemes()
             let brightness = try? await endpoint.brightness()
@@ -322,8 +373,12 @@ final class AppState {
             let name = try? await endpoint.deviceName()
             guard revision == connectionRevision, !Task.isCancelled else { return }
             if let themes, !themes.isEmpty { availableThemes = themes }
-            if let brightness { brightnessValue = brightness }
-            if let volume { volumeValue = volume }
+            if let brightness, brightnessRevision == brightnessMutationRevision, brightnessWriteTask == nil {
+                brightnessValue = brightness; confirmedBrightnessValue = brightness
+            }
+            if let volume, volumeRevision == volumeMutationRevision, volumeWriteTask == nil {
+                volumeValue = volume; confirmedVolumeValue = volume
+            }
             if let wifiState { wifiStateText = wifiState }
             if let name { deviceNameText = name }
         } catch {
@@ -348,7 +403,7 @@ final class AppState {
     }
 
     /// Runs while the popover is visible; keeps the live preview fresh.
-    func previewLoop() async {
+    func previewLoop(interval: Duration = .seconds(1)) async {
         while !Task.isCancelled {
             let revision = connectionRevision
             let endpoint = client.snapshot()
@@ -367,17 +422,17 @@ final class AppState {
                     batteryCharge = nil
                 }
             }
-            try? await Task.sleep(for: .seconds(1))
+            try? await Task.sleep(for: interval)
         }
     }
 
     private static func cgImage(from frame: ScreenFrame) -> CGImage? {
         var rgba = Data(capacity: frame.width * frame.height * 4)
-        let pixels = frame.grbPixels
+        let pixels = frame.bgrPixels
         for i in stride(from: 0, to: frame.width * frame.height * 3, by: 3) {
-            rgba.append(pixels[pixels.startIndex + i + 1]) // R (stream is GRB)
-            rgba.append(pixels[pixels.startIndex + i])     // G
-            rgba.append(pixels[pixels.startIndex + i + 2]) // B
+            rgba.append(pixels[pixels.startIndex + i + 2]) // R (stream is BGR)
+            rgba.append(pixels[pixels.startIndex + i + 1]) // G
+            rgba.append(pixels[pixels.startIndex + i])     // B
             rgba.append(0xFF)
         }
         guard let provider = CGDataProvider(data: rgba as CFData) else { return nil }
@@ -393,30 +448,89 @@ final class AppState {
 
     // MARK: - Device controls
 
-    func applyBrightness(_ value: String) {
+    @discardableResult
+    func applyBrightness(_ value: String) -> Task<Void, Never> {
+        let revision = connectionRevision
+        let endpoint = client.snapshot()
+        brightnessWriteSequence += 1
+        brightnessMutationRevision += 1
+        let sequence = brightnessWriteSequence
+        let previousTask = brightnessWriteTask
         brightnessValue = value
-        Task {
-            do { try await client.setBrightness(value); lastError = nil }
-            catch { lastError = error.localizedDescription }
+        let task = Task {
+            // Serialize writes and skip superseded selections that have not started.
+            await previousTask?.value
+            defer {
+                brightnessMutationRevision += 1
+                if sequence == brightnessWriteSequence { brightnessWriteTask = nil }
+            }
+            guard revision == connectionRevision, sequence == brightnessWriteSequence, !Task.isCancelled else { return }
+            do {
+                try await endpoint.setBrightness(value)
+                guard revision == connectionRevision, !Task.isCancelled else { return }
+                confirmedBrightnessValue = value
+                guard sequence == brightnessWriteSequence else { return }
+                lastError = nil
+            } catch {
+                guard revision == connectionRevision, sequence == brightnessWriteSequence, !Task.isCancelled else { return }
+                brightnessValue = confirmedBrightnessValue
+                lastError = error.localizedDescription
+            }
         }
+        brightnessWriteTask = task
+        return task
     }
 
-    func applyVolume(_ value: Int) {
+    @discardableResult
+    func applyVolume(_ value: Int) -> Task<Void, Never> {
+        let revision = connectionRevision
+        let endpoint = client.snapshot()
+        volumeWriteSequence += 1
+        volumeMutationRevision += 1
+        let sequence = volumeWriteSequence
+        let previousTask = volumeWriteTask
         volumeValue = value
-        Task {
-            do { try await client.setVolume(value); lastError = nil }
-            catch { lastError = error.localizedDescription }
+        let task = Task {
+            // Serialize writes and skip superseded selections that have not started.
+            await previousTask?.value
+            defer {
+                volumeMutationRevision += 1
+                if sequence == volumeWriteSequence { volumeWriteTask = nil }
+            }
+            guard revision == connectionRevision, sequence == volumeWriteSequence, !Task.isCancelled else { return }
+            do {
+                try await endpoint.setVolume(value)
+                guard revision == connectionRevision, !Task.isCancelled else { return }
+                confirmedVolumeValue = value
+                guard sequence == volumeWriteSequence else { return }
+                lastError = nil
+            } catch {
+                guard revision == connectionRevision, sequence == volumeWriteSequence, !Task.isCancelled else { return }
+                volumeValue = confirmedVolumeValue
+                lastError = error.localizedDescription
+            }
         }
+        volumeWriteTask = task
+        return task
     }
 
     func applyDeviceName() {
+        let revision = connectionRevision
+        let endpoint = client.snapshot()
+        let name = deviceNameText
         Task {
-            do { try await client.setDeviceName(deviceNameText); lastError = nil }
-            catch { lastError = error.localizedDescription }
+            do {
+                try await endpoint.setDeviceName(name)
+                guard revision == connectionRevision else { return }
+                lastError = nil
+            } catch {
+                guard revision == connectionRevision else { return }
+                lastError = error.localizedDescription
+            }
         }
     }
 
-    func checkForUpdate() {
+    func checkForUpdate(pollInterval: Duration = .seconds(2)) {
         let revision = connectionRevision
         let endpoint = client.snapshot()
         updateCheckText = "Checking…"
@@ -424,11 +538,11 @@ final class AppState {
             do {
                 try await endpoint.startUpdateCheck()
                 for _ in 0..<15 {
-                    try await Task.sleep(for: .seconds(2))
+                    try await Task.sleep(for: pollInterval)
                     let status = try await endpoint.updateStatus()
                     guard revision == connectionRevision else { return }
                     switch status.check.status {
-                    case "ok", "success":
+                    case "available", "not_available", "ok", "success":
                         updateCheckText = status.check.available_version.isEmpty
                             ? "Up to date (\(firmwareVersion ?? "?"))"
                             : "Update available: \(status.check.available_version)"
@@ -451,38 +565,80 @@ final class AppState {
 
     // MARK: - Timers
 
-    func startPomodoro(workMinutes: Int, restMinutes: Int, cycles: Int) {
-        Task {
+    @discardableResult
+    func startPomodoro(workMinutes: Int, restMinutes: Int, cycles: Int) -> Task<Void, Never> {
+        enqueueBusyWrite { [self] endpoint, revision in
             do {
-                try await client.startIntervalSession(
+                await arcade.stopAndWait()
+                try await endpoint.startIntervalSession(
                     workMinutes: workMinutes, restMinutes: restMinutes, cycles: cycles,
                     theme: theme, triggerSmartHome: triggerSmartHome
                 )
+                guard revision == connectionRevision else { return }
                 onCall = true
                 weSetBusy = true
                 lastError = nil
-                if slackSyncEnabled { _ = await slackSync.setBusy(true) }
+                if slackSyncEnabled { lastError = await slackSync.setBusy(true) }
             } catch {
+                guard revision == connectionRevision else { return }
                 lastError = error.localizedDescription
             }
         }
     }
 
-    func startSimpleTimer(minutes: Int) {
-        Task {
+    @discardableResult
+    func startSimpleTimer(minutes: Int) -> Task<Void, Never> {
+        enqueueBusyWrite { [self] endpoint, revision in
             do {
-                try await client.startSimpleSession(minutes: minutes, theme: theme, triggerSmartHome: triggerSmartHome)
+                await arcade.stopAndWait()
+                try await endpoint.startSimpleSession(minutes: minutes, theme: theme, triggerSmartHome: triggerSmartHome)
+                guard revision == connectionRevision else { return }
                 onCall = true
                 weSetBusy = true
                 lastError = nil
-                if slackSyncEnabled { _ = await slackSync.setBusy(true) }
+                if slackSyncEnabled { lastError = await slackSync.setBusy(true) }
             } catch {
+                guard revision == connectionRevision else { return }
                 lastError = error.localizedDescription
             }
         }
     }
 
     // MARK: - Ping badge
+
+    /// Device apps own their display. Pause our recurring overlays until Stop or
+    /// Resume Widgets, without changing the user's saved widget preferences.
+    func launchDeviceApp(_ app: DeviceApp, on endpoint: BusyBarClient) async throws {
+        _ = try endpoint.appQuery(app.id)
+        let revision = connectionRevision
+        let wasPaused = widgetsPausedForApp
+        widgetsPausedForApp = true
+        pingTask?.cancel()
+        weatherTask?.cancel()
+        await pingTask?.value
+        await weatherTask?.value
+        await arcade.stopAndWait()
+        do {
+            guard revision == connectionRevision else { throw BusyBarError(message: "Device changed. Launch the app again.") }
+            try await endpoint.clearDisplay()
+            try await endpoint.launchApp(id: app.id)
+            if revision == connectionRevision { launchedDeviceAppID = app.id }
+        } catch {
+            if revision == connectionRevision, !wasPaused { resumeWidgets() }
+            throw error
+        }
+    }
+
+    func resumeWidgets() {
+        widgetsPausedForApp = false
+        launchedDeviceAppID = nil
+        if showPing { syncPingLoop() }
+        if showWeather { syncWeatherLoop() }
+    }
+
+    func deviceAppRemoved(_ app: DeviceApp) {
+        if launchedDeviceAppID == app.id { resumeWidgets() }
+    }
 
     private func syncPingLoop() {
         pingTask?.cancel()
@@ -499,7 +655,7 @@ final class AppState {
                 self.latestPingMs = ms
                 // The badge self-expires (10 s timeout), so a stopped loop
                 // or an active busy session just lets it fade out.
-                if !self.onCall && !self.arcade.isActive {
+                if !Task.isCancelled && !self.onCall && !self.arcade.isActive && !self.widgetsPausedForApp {
                     let text: String
                     let color: String
                     if let ms {
@@ -536,7 +692,7 @@ final class AppState {
             return
         }
         Task {
-            guard let place = await WeatherMonitor.geocode(trimmed) else {
+            guard let place = await WeatherMonitor.geocode(trimmed, session: weatherSession) else {
                 lastError = "Could not find “\(trimmed)”"
                 return
             }
@@ -569,18 +725,20 @@ final class AppState {
                 // Re-fetch every 10 min; redraw every 60 s to keep the
                 // elements alive (150 s timeout lets them fade if we stop).
                 if Date().timeIntervalSince(lastFetch) > 600 {
-                    if let reading = await WeatherMonitor.fetch() {
+                    if let reading = await WeatherMonitor.fetch(defaults: self.defaults, session: self.weatherSession) {
                         self.latestWeather = reading
                         lastFetch = Date()
                     }
                 }
-                if let reading = self.latestWeather, !self.onCall, !self.arcade.isActive {
+                if let reading = self.latestWeather, !self.onCall, !self.arcade.isActive, !self.widgetsPausedForApp {
                     var iconOK = self.lastWeatherIconEmoji == reading.emoji
                     if !iconOK, let png = MessageRenderer.renderEmojiIcon(reading.emoji) {
                         iconOK = (try? await self.client.uploadAsset(filename: "wx.png", data: png)) != nil
                         if iconOK { self.lastWeatherIconEmoji = reading.emoji }
                     }
-                    try? await self.client.drawWeatherBadge(iconUploaded: iconOK, tempText: reading.tempText)
+                    if !Task.isCancelled, !self.widgetsPausedForApp {
+                        try? await self.client.drawWeatherBadge(iconUploaded: iconOK, tempText: reading.tempText)
+                    }
                 }
                 try? await Task.sleep(for: .seconds(60))
             }
@@ -602,11 +760,15 @@ final class AppState {
             lastError = "Stop the arcade before drawing another item."
             return
         }
+        let endpoint = client.snapshot()
+        let revision = connectionRevision
         Task {
             do {
-                try await client.drawCountdown(to: date, colorHex: "#FFAA00FF", timeout: 0, priority: 95)
+                try await endpoint.drawCountdown(to: date, colorHex: "#FFAA00FF", timeout: 0, priority: 95)
+                guard revision == connectionRevision else { return }
                 lastError = nil
             } catch {
+                guard revision == connectionRevision else { return }
                 lastError = error.localizedDescription
             }
         }
@@ -614,35 +776,60 @@ final class AppState {
 
     // MARK: - On-call logic
 
-    private func micStateChanged(_ activity: MicMonitor.Activity) {
+    @discardableResult
+    func micStateChanged(_ activity: MicMonitor.Activity) -> Task<Void, Never>? {
         micInUse = activity.isInUse
         activeMicrophoneNames = activity.deviceNames
-        guard autoOnCall else { return }
-        syncAutoBusy()
+        guard autoOnCall else { return nil }
+        return syncAutoBusy()
     }
 
     private var wantAutoBusy: Bool {
         (autoOnCall && micInUse) || (calendarAutoBusy && inMeeting)
     }
 
-    private func syncAutoBusy() {
+    @discardableResult
+    private func syncAutoBusy() -> Task<Void, Never>? {
         offDebounceTask?.cancel()
         if wantAutoBusy {
-            setOnCall(true, automatic: true)
+            return setOnCall(true, automatic: true)
         } else if weSetBusy {
             let delay = offDebounceSeconds
             offDebounceTask = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(delay))
                 guard !Task.isCancelled, let self, !self.wantAutoBusy else { return }
-                self.setOnCall(false, automatic: true)
+                await self.setOnCall(false, automatic: true).value
             }
+            return offDebounceTask
         }
+        return nil
     }
 
-    func setOnCall(_ on: Bool, automatic: Bool = false) {
+    private func enqueueBusyWrite(_ operation: @escaping @MainActor (BusyBarClient, Int) async -> Void) -> Task<Void, Never> {
         let revision = connectionRevision
         let endpoint = client.snapshot()
-        Task {
+        let previous = busyWriteTask
+        busyWriteSequence += 1
+        busyMutationRevision += 1
+        let sequence = busyWriteSequence
+        let task = Task {
+            // Finish each device + Slack transition before the next one starts.
+            // Otherwise a slow call-start response can overtake a call end.
+            await previous?.value
+            defer {
+                busyMutationRevision += 1
+                if sequence == busyWriteSequence { busyWriteTask = nil }
+            }
+            guard !Task.isCancelled, revision == connectionRevision else { return }
+            await operation(endpoint, revision)
+        }
+        busyWriteTask = task
+        return task
+    }
+
+    @discardableResult
+    func setOnCall(_ on: Bool, automatic: Bool = false) -> Task<Void, Never> {
+        enqueueBusyWrite { [self] endpoint, revision in
             do {
                 if on, arcade.isActive {
                     arcade.stop()
@@ -651,6 +838,7 @@ final class AppState {
                     // Don't stomp a busy session the user started elsewhere.
                     let current = try await endpoint.currentBusyType()
                     guard revision == connectionRevision else { return }
+                    guard wantAutoBusy else { return }
                     if current != "NOT_STARTED" && !weSetBusy {
                         onCall = true
                         return
@@ -662,6 +850,9 @@ final class AppState {
                 weSetBusy = on
                 deviceReachable = true
                 lastError = nil
+                // The microphone may have gone idle while the write was in
+                // flight, before we owned the new session. Schedule its clear now.
+                if on && automatic && !wantAutoBusy { syncAutoBusy() }
                 if !on { flushQueuedNotifications() }
                 if slackSyncEnabled {
                     if let slackError = await slackSync.setBusy(on) {
@@ -670,15 +861,17 @@ final class AppState {
                 }
             } catch {
                 guard revision == connectionRevision else { return }
-                lastError = error.localizedDescription
+                let failure = error.localizedDescription
                 await refreshDeviceStatus()
+                guard revision == connectionRevision else { return }
+                lastError = failure
             }
         }
     }
 
     // MARK: - Notification forwarding
 
-    private func handleNotification(_ note: ForwardedNotification) {
+    func handleNotification(_ note: ForwardedNotification) {
         guard !arcade.isActive else { return }
         let filters = notificationAppFilter
             .split(separator: ",")
@@ -718,15 +911,20 @@ final class AppState {
         let bundle = bundleID.lowercased()
         let ledColor = Self.ledColors.first { bundle.contains($0.match) }?.hex ?? "#FFFFFFFF"
         let chime = notificationChime
+        let endpoint = client.snapshot()
+        let revision = connectionRevision
         Task {
             do {
-                try await client.drawText(ascii, font: .normal, colorHex: "#FFFFFFFF", timeout: 20, priority: 95, ledColor: ledColor)
+                try await endpoint.drawText(ascii, font: .normal, colorHex: "#FFFFFFFF", timeout: 20, priority: 95, ledColor: ledColor)
+                guard revision == connectionRevision else { return }
                 if chime {
-                    try? await client.playSound(stockPath: "shared/calendar_event_starts.snd")
+                    try? await endpoint.playSound(stockPath: "shared/calendar_event_starts.snd")
                 }
+                guard revision == connectionRevision else { return }
                 log.info("notification drawn on bar (\(ascii.count) chars)")
                 lastError = nil
             } catch {
+                guard revision == connectionRevision else { return }
                 log.error("notification draw failed: \(error.localizedDescription, privacy: .public)")
                 lastError = error.localizedDescription
             }
@@ -739,10 +937,19 @@ final class AppState {
         queuedNotifications.removeAll()
         queuedCount = 0
         log.info("flushing \(queued.count) queued notifications")
-        Task {
+        notificationReplayTask?.cancel()
+        let endpoint = client.snapshot()
+        let revision = connectionRevision
+        notificationReplayTask = Task { [weak self] in
             for (index, text) in queued.enumerated() {
+                guard let self, !Task.isCancelled, revision == self.connectionRevision else { return }
+                if self.onCall {
+                    self.queuedNotifications = Array((Array(queued[index...]) + self.queuedNotifications).suffix(5))
+                    self.queuedCount = self.queuedNotifications.count
+                    return
+                }
                 let label = queued.count > 1 ? "[\(index + 1)/\(queued.count)] \(text)" : text
-                try? await client.drawText(label, font: .normal, colorHex: "#FFFFFFFF", timeout: 12, priority: 95, ledColor: "#FFFFFFFF")
+                try? await endpoint.drawText(label, font: .normal, colorHex: "#FFFFFFFF", timeout: 12, priority: 95, ledColor: "#FFFFFFFF")
                 if index < queued.count - 1 {
                     try? await Task.sleep(for: .seconds(13))
                 }
@@ -750,10 +957,10 @@ final class AppState {
         }
     }
 
-    private static func asciiFold(_ text: String) -> String {
-        let transformed = text.applyingTransform(
-            StringTransform("Any-Latin; Latin-ASCII"), reverse: false
-        ) ?? text
+    static func asciiFold(_ text: String, transform: (String) -> String? = {
+        $0.applyingTransform(StringTransform("Any-Latin; Latin-ASCII"), reverse: false)
+    }) -> String {
+        let transformed = transform(text) ?? text
         let filtered = transformed.unicodeScalars
             .filter { $0.value >= 0x20 && $0.value <= 0x7E }
         return String(String.UnicodeScalarView(filtered))
@@ -770,19 +977,23 @@ final class AppState {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         let hex = MessageRenderer.rgbaHex(from: color)
+        let revision = connectionRevision
+        let endpoint = client.snapshot()
         Task {
             do {
                 if MessageRenderer.isPlainASCII(trimmed) {
-                    try await client.drawText(trimmed, font: font, colorHex: hex, timeout: timeoutSeconds, priority: 95)
+                    try await endpoint.drawText(trimmed, font: font, colorHex: hex, timeout: timeoutSeconds, priority: 95)
                 } else {
-                    guard let png = MessageRenderer.renderToPNG(trimmed, colorHex: hex) else {
+                    guard let png = renderMessage(trimmed, hex) else {
                         throw BusyBarError(message: "Could not render message image")
                     }
-                    try await client.uploadAsset(filename: "message.png", data: png)
-                    try await client.drawImage(named: "message.png", timeout: timeoutSeconds, priority: 95)
+                    try await endpoint.uploadAsset(filename: "message.png", data: png)
+                    try await endpoint.drawImage(named: "message.png", timeout: timeoutSeconds, priority: 95)
                 }
+                guard revision == connectionRevision else { return }
                 lastError = nil
             } catch {
+                guard revision == connectionRevision else { return }
                 lastError = error.localizedDescription
             }
         }
@@ -799,26 +1010,34 @@ final class AppState {
             lastError = "Stop the arcade before sending a drawing."
             return
         }
+        let revision = connectionRevision
+        let endpoint = client.snapshot()
         Task {
             do {
                 guard let png = MessageRenderer.renderGridToPNG(grid) else {
                     throw BusyBarError(message: "Could not encode drawing")
                 }
-                try await client.uploadAsset(filename: "canvas.png", data: png)
-                try await client.drawImage(named: "canvas.png", timeout: timeoutSeconds, priority: 95)
+                try await endpoint.uploadAsset(filename: "canvas.png", data: png)
+                try await endpoint.drawImage(named: "canvas.png", timeout: timeoutSeconds, priority: 95)
+                guard revision == connectionRevision else { return }
                 lastError = nil
             } catch {
+                guard revision == connectionRevision else { return }
                 lastError = error.localizedDescription
             }
         }
     }
 
     func clearDisplay() {
+        let revision = connectionRevision
+        let endpoint = client.snapshot()
         Task {
             do {
-                try await client.clearDisplay()
+                try await endpoint.clearDisplay()
+                guard revision == connectionRevision else { return }
                 lastError = nil
             } catch {
+                guard revision == connectionRevision else { return }
                 lastError = error.localizedDescription
             }
         }

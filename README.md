@@ -32,7 +32,7 @@ tools when you explicitly configure them.
 
 ## Features
 
-**Menu bar app** (tabbed popover: Device / Message / Timers / Arcade / Settings)
+**Menu bar app** (tabbed popover: Device / Message / Timers / Arcade / Apps / Settings)
 
 - 🎙 **Auto On-Call** — flips the bar to *On Air* the moment any app opens your microphone (Teams, Zoom, FaceTime…), clears when the mic goes idle. Uses CoreAudio device state — no microphone permission needed, no audio ever captured.
 - 📺 **Live preview** — see what's on the bar's display, right in the popover.
@@ -46,11 +46,13 @@ tools when you explicitly configure them.
   physical 72×16 display using your Mac keyboard. The Mac preview is optional
   and off by default.
 - 💤 **Slack sync** — bar goes busy → your Slack status becomes "🎧 On a call" + DND; clears after.
+- 📦 **JS apps** — list installed apps, upload `.tgz`/`.tar` packages, review replacements, install, run, stop, remove, and edit/reset app settings. Native controls are generated from each app's settings schema; advanced JSON is available for unsupported field types. Requires device firmware 1.3.1+. Launching an app stops Arcade and pauses ambient widgets; Stop Running App or Device → Resume restores widgets.
+- 🛠 **All Device Controls** — a native, searchable API explorer in Settings for Wi-Fi, Bluetooth, storage, Matter, device/account settings, time, firmware updates, input and more. Supports request parameters, JSON, binary uploads and response export. Changes require reviewing the values and clicking Apply. Includes a live WebSocket status inspector with decoded updates and packet export.
 - ⚙️ Brightness/volume control, device rename, firmware update check, launch at login.
 
 **Developer tools**
 
-- 🖥 **`barkeep` CLI** — `barkeep send "build done" -c green`, `barkeep busy on -T coding`, `barkeep timer 45`, `barkeep pomodoro`… zero dependencies, scriptable from anything.
+- 🖥 **`barkeep` CLI** — `barkeep send "build done" -c green`, `barkeep busy on -T coding`, `barkeep timer 45`, `barkeep pomodoro`… uses Python’s standard library, scriptable from anything.
 - 🤖 **Claude Code hooks** — the bar becomes your agent status light: green scroll + chime when a long task finishes, red flash when Claude waits on input.
 - 🔌 **MCP server** — exposes the bar as tools (`bar_send_message`, `bar_set_busy`, `bar_start_timer`, …) so Claude, Codex, and ChatGPT desktop can drive it directly.
 
@@ -127,6 +129,9 @@ cd barkeep
 ```
 
 This builds and launches `dist/BarKeep.app` (menu bar only, no Dock icon).
+For a regular controls window, quit BarKeep and launch with
+`open -a BarKeep --args --show-window`. This is useful when the menu item is hidden
+by the MacBook’s notch.
 Signing prefers a Developer ID Application identity, then Apple Development,
 or `$BARKEEP_SIGN_IDENTITY` when explicitly set; otherwise it falls back to
 ad-hoc.
@@ -160,7 +165,8 @@ codex mcp add barkeep \
 ```
 
 Restart ChatGPT desktop, Codex, or the IDE extension after adding the server.
-Use `/mcp` to confirm that `barkeep` is connected.
+Use `/mcp` to confirm that `barkeep` is connected. After upgrading `barkeep-cli`,
+restart the client again to load new tools such as app management.
 
 To notify the Busy Bar whenever Codex or ChatGPT desktop finishes a turn and
 waits for you, add this top-level setting to `~/.codex/config.toml`:
@@ -200,6 +206,38 @@ ad-hoc-signed copies may require the permission to be granted again.
 2. *OAuth & Permissions* → **User Token Scopes**: `users.profile:write`, `dnd:write`
 3. *Install to Workspace*, copy the **User OAuth Token** (`xoxp-…`)
 4. Paste into BarKeep → Settings → Slack
+
+## JavaScript apps
+
+Open **Apps → Upload…**, select a package built with [Busy Tools](https://github.com/busy-app/busy-tools),
+review its name/version and any replacement, then choose **Install App**. Installation
+does not automatically launch it. Use **Run**, **Stop Running App**, **Settings…** or
+**Remove…** to manage installed apps. Removal preserves saved app settings on the bar.
+Settings changes may require relaunching the app. No Node.js or vendor desktop app
+is needed to install a prebuilt package; building source uses the official Node 24 tooling.
+
+```sh
+barkeep apps list
+barkeep apps install ./dist/app.example.my_app.tgz
+barkeep apps run app.example.my_app
+barkeep apps settings app.example.my_app
+barkeep apps set-settings app.example.my_app settings.json
+barkeep apps stop
+barkeep apps remove app.example.my_app
+barkeep api GET /wifi/status
+barkeep api GET /storage/read --query '{"path":"/ext/example.txt"}' --output example.txt
+```
+
+The MCP server exposes separate stage/install tools so an agent can inspect package
+details before installing, plus list/launch/stop/remove/settings tools. `bar_api_read`
+and `bar_api_write` expose the remaining local HTTP operations. Restart your MCP client
+after upgrading to discover the new tool list. Device changes should only be made
+when requested. Use `barkeep apps --help` or `barkeep api --help` for all options.
+
+The API explorer catalogs the device's 81 API operations. The WebSocket operation
+is documented but is not an ordinary HTTP action; live preview currently uses screen
+polling. See [API support and release gates](docs/device-api-coverage.md) for precise
+capabilities and testing limits.
 
 ## Busy Bar Arcade
 
@@ -250,7 +288,7 @@ CLI env: `BARKEEP_HOST` (device address, default `10.0.4.20`),
 
 ## Device API notes
 
-Verified against firmware 1.0.2 / API 24.3.0
+JS app lifecycle verified against firmware 1.3.1 / API 27.14.0
 ([official local HTTP API docs](https://docs.busy.app/bar/dev/http-api)):
 
 - Over USB the API is served at `http://10.0.4.20/api/*` with no authentication. Over Wi-Fi, enable HTTP API access in the bar's local web interface, configure its numeric password, then enter that same password in BarKeep Settings. BarKeep sends it using the firmware API's documented `X-API-Token` header. API tokens generated at `cloud.busy.app` are for the internet API and do not authenticate requests to a local IP address. The docs' `/busybar/*` prefix is for the cloud proxy; BarKeep communicates with the device locally.
@@ -263,7 +301,8 @@ Verified against firmware 1.0.2 / API 24.3.0
 ## Development
 
 ```bash
-swift test             # run the test suite
+swift test --enable-code-coverage  # run tests and measure Swift coverage
+python3 -m unittest discover -s Tests/Python  # agent/CLI regression tests
 swift build            # debug build
 ./make-app.sh          # signed release build + launch
 ```

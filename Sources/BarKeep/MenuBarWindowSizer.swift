@@ -118,8 +118,8 @@ struct MenuBarWindowSizer: NSViewRepresentable {
         }
 
         private func applyDesiredFrame() {
-            guard let window, desiredContentSize != .zero else { return }
-            let topY = anchorTopY ?? window.frame.maxY
+            // A detached/uninitialized coordinator has no stable top anchor.
+            guard let window, let topY = anchorTopY, desiredContentSize != .zero else { return }
             var anchoredFrame = window.frame
             anchoredFrame.origin.y = topY - anchoredFrame.height
             let targetFrame = MenuBarWindowSizer.frame(
