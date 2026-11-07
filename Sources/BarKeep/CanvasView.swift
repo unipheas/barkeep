@@ -132,13 +132,13 @@ struct CanvasCell: Equatable {
         let dx = abs(end.x - x), dy = -abs(end.y - y)
         let sx = x < end.x ? 1 : -1, sy = y < end.y ? 1 : -1
         var error = dx + dy
-        var cells: [Self] = []
-        while true {
-            cells.append(Self(x: x, y: y))
-            if x == end.x && y == end.y { return cells }
+        var cells = [start]
+        while x != end.x || y != end.y {
             let twiceError = 2 * error
             if twiceError >= dy { error += dy; x += sx }
             if twiceError <= dx { error += dx; y += sy }
+            cells.append(Self(x: x, y: y))
         }
+        return cells
     }
 }

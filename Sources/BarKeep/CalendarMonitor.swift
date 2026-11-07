@@ -32,13 +32,14 @@ final class CalendarMonitor {
     private let source: CalendarSource
     private let center: NotificationCenter
     private let now: () -> Date
+    private let identifier: (EKEvent) -> String?
     private var timer: Timer?
     private var observer: NSObjectProtocol?
     private var signature = ""
 
-    init(source: CalendarSource? = nil, center: NotificationCenter = .default, now: @escaping () -> Date = Date.init) {
+    init(source: CalendarSource? = nil, center: NotificationCenter = .default, now: @escaping () -> Date = Date.init, identifier: @escaping (EKEvent) -> String? = { $0.eventIdentifier }) {
         self.source = source ?? SystemCalendarSource()
-        self.center = center; self.now = now
+        self.center = center; self.now = now; self.identifier = identifier
     }
     var authorizationStatus: EKAuthorizationStatus { source.authorizationStatus }
 
@@ -96,7 +97,7 @@ final class CalendarMonitor {
         // EventKit can mutate an existing event object in place. Compare a stored
         // value snapshot so title/time changes with the same identifier are visible.
         let updatedSignature = [current,next].map { event in
-            event.map { "\($0.eventIdentifier ?? "")|\($0.title ?? "")|\($0.startDate.timeIntervalSince1970)|\($0.endDate.timeIntervalSince1970)" } ?? ""
+            event.map { "\(identifier($0) ?? "")|\($0.title ?? "")|\($0.startDate.timeIntervalSince1970)|\($0.endDate.timeIntervalSince1970)" } ?? ""
         }.joined(separator:"\n")
         let changed = updatedSignature != signature
         signature = updatedSignature; currentEvent = current; nextEvent = next

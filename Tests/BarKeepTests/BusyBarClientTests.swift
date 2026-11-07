@@ -2,6 +2,22 @@ import XCTest
 @testable import BarKeep
 
 final class BusyBarClientTests: XCTestCase {
+    func testMissingRequestURLFailsBeforeTransport() async {
+        let client = BusyBarClient(host: "fixture.test", session: HTTPStub.session())
+        HTTPStub.handler = { _ in XCTFail("Missing URL must not reach transport"); return (500, Data()) }
+        defer { HTTPStub.handler = nil }
+        var request = URLRequest(url: URL(string: "http://fixture.test")!)
+        request.url = nil
+        do { _ = try await client.send(request); XCTFail("Accepted a missing URL") }
+        catch { XCTAssertEqual(error.localizedDescription, "Missing request URL") }
+    }
+
+    func testBareHostNormalizationPreservesEmptyAndSlashBoundaries() {
+        for (input, expected) in [("", ""), ("///", ""), ("host/path/", "host"), ("/host//path/", "host"), ("host", "host")] {
+            XCTAssertEqual(BusyBarClient.normalizedHost(input), expected)
+        }
+    }
+
     func testConcurrentConnectionChangesNeverMixHostAndPassword() {
         let client=BusyBarClient(host:"first.test",token:"first")
         DispatchQueue.concurrentPerform(iterations:1000) { index in

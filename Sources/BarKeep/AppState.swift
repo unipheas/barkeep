@@ -21,6 +21,7 @@ final class AppState {
     private var connection: DeviceConnection
     private let defaults: UserDefaults
     private let weatherSession: URLSession
+    private let loginItems: LoginItemService
     private let renderMessage: (String, String) -> Data?
     private(set) var connectionRevision = 0
     private var connectionTask: Task<Void, Never>?
@@ -177,11 +178,10 @@ final class AppState {
     private(set) var nextMeetingTitle: String?
     private(set) var nextMeetingDate: Date?
     var launchAtLogin: Bool {
-        get { SMAppService.mainApp.status == .enabled }
+        get { loginItems.isEnabled() }
         set {
             do {
-                if newValue { try SMAppService.mainApp.register() }
-                else { try SMAppService.mainApp.unregister() }
+                try loginItems.setEnabled(newValue)
             } catch {
                 lastError = error.localizedDescription
             }
@@ -230,13 +230,15 @@ final class AppState {
         micMonitor: MicMonitor? = nil,
         notificationWatcher: NotificationWatcher? = nil,
         arcadeKeyboard: (any ArcadeKeyboardCapturing)? = nil,
-        renderMessage: @escaping (String, String) -> Data? = MessageRenderer.renderToPNG
+        renderMessage: @escaping (String, String) -> Data? = MessageRenderer.renderToPNG,
+        loginItems: LoginItemService? = nil
     ) {
         let connection = DeviceConnection(defaults: defaults)
         self.connection = connection
         self.defaults = defaults
         self.weatherSession = weatherSession
         self.renderMessage = renderMessage
+        self.loginItems = loginItems ?? .live
         self.calendarMonitor = CalendarMonitor(source: calendarSource)
         self.localNetworkPermissionTrigger = localNetworkPermissionTrigger ?? LocalNetworkPermissionTrigger()
         self.micMonitor = micMonitor ?? MicMonitor()
@@ -955,10 +957,10 @@ final class AppState {
         }
     }
 
-    private static func asciiFold(_ text: String) -> String {
-        let transformed = text.applyingTransform(
-            StringTransform("Any-Latin; Latin-ASCII"), reverse: false
-        ) ?? text
+    static func asciiFold(_ text: String, transform: (String) -> String? = {
+        $0.applyingTransform(StringTransform("Any-Latin; Latin-ASCII"), reverse: false)
+    }) -> String {
+        let transformed = transform(text) ?? text
         let filtered = transformed.unicodeScalars
             .filter { $0.value >= 0x20 && $0.value <= 0x7E }
         return String(String.UnicodeScalarView(filtered))

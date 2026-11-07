@@ -89,7 +89,7 @@ enum AppSettingsDocument {
             copy[key] = keys.count == 1 ? value : update(object[key] as? [String: Any] ?? [:], keys.dropFirst())
             return copy
         }
-        root["values"] = update(values, path[...])
+        root["values"] = update(values, ArraySlice(path))
         return try BusyBarClient.prettyJSON(JSONSerialization.data(withJSONObject: root))
     }
 }

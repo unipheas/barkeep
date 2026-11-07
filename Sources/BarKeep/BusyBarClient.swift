@@ -129,10 +129,11 @@ final class BusyBarClient: @unchecked Sendable {
             }
             return hostname
         }
-        return trimmed
-            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-            .components(separatedBy: "/")
-            .first ?? trimmed
+        let address = trimmed.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        if let slash = address.range(of: "/") {
+            return String(address[..<slash.lowerBound])
+        }
+        return address
     }
 
     static func webInterfaceURL(for host: String) -> URL? {
@@ -141,6 +142,9 @@ final class BusyBarClient: @unchecked Sendable {
 
     @discardableResult
     func send(_ req: URLRequest) async throws -> Data {
+        guard let requestURL = req.url else {
+            throw BusyBarError(message: "Missing request URL")
+        }
         let (data, response) = try await session.data(for: req)
         guard let http = response as? HTTPURLResponse else {
             throw BusyBarError(message: "No HTTP response")
@@ -148,7 +152,7 @@ final class BusyBarClient: @unchecked Sendable {
         guard (200..<300).contains(http.statusCode) else {
             let bodyText = String(data: data, encoding: .utf8) ?? ""
             throw BusyBarError(
-                message: "HTTP \(http.statusCode) \(req.url?.path ?? ""): \(bodyText.prefix(200))",
+                message: "HTTP \(http.statusCode) \(requestURL.path): \(bodyText.prefix(200))",
                 statusCode: http.statusCode
             )
         }

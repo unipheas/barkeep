@@ -44,7 +44,7 @@ protocol ArcadeKeyboardCapturing: AnyObject {
 }
 
 @MainActor
-private final class ArcadeKeyboardCapture: NSObject, NSWindowDelegate, ArcadeKeyboardCapturing {
+final class ArcadeKeyboardCapture: NSObject, NSWindowDelegate, ArcadeKeyboardCapturing {
     private var panel: ArcadeInputPanel?
     private var eventMonitor: Any?
     private var previousApplication: NSRunningApplication?
@@ -316,8 +316,8 @@ final class ArcadeController {
                 self.consecutiveFailures = 0
                 self.nextUploadAllowed = .now
                 self.errorMessage = nil
-            } catch is CancellationError {
-                // Process shutdown can still cancel URLSession work.
+            } catch where error is CancellationError || (error as? URLError)?.code == .cancelled {
+                // URLSession reports cancellation as URLError.cancelled.
             } catch {
                 guard self.uploadLifecycle.shouldDraw(
                     uploadSession: frameGeneration,

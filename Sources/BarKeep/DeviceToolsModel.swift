@@ -12,6 +12,12 @@ final class DeviceToolsModel {
     private(set) var response = ""
     private(set) var responseData: Data?
     private(set) var working = false
+    private let fileSize: (URL) throws -> Int?
+
+    init(fileSize: @escaping (URL) throws -> Int? = { try $0.resourceValues(forKeys: [.fileSizeKey]).fileSize }) {
+        self.fileSize = fileSize
+    }
+
     private var revision = 0
     private var pending: Request?
     var confirmationHost: String? { pending?.client.host }
@@ -35,7 +41,7 @@ final class DeviceToolsModel {
     private func prepare(_ endpoint: DeviceEndpoint, client: BusyBarClient) throws -> Request {
         var file: Data?
         if endpoint.isBinary, let upload {
-            let size = try upload.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+            let size = try fileSize(upload) ?? 0
             guard size <= 256 * 1024 * 1024 else { throw BusyBarError(message: "Choose a file smaller than 256 MB.") }
             file = try Data(contentsOf: upload)
         }

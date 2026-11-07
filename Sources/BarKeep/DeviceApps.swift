@@ -99,6 +99,7 @@ final class DeviceAppsModel {
     var settingsJSON = ""
     private(set) var settingsSchema: AppSettingsSchema?
     private let client: BusyBarClient
+    private let fileSize: (URL) throws -> Int?
     private let liveClient: BusyBarClient
     private let launchAction: ((BusyBarClient, DeviceApp) async throws -> Void)?
     private let stopAction: (() -> Void)?
@@ -107,10 +108,12 @@ final class DeviceAppsModel {
     init(client: BusyBarClient,
          launchAction: ((BusyBarClient, DeviceApp) async throws -> Void)? = nil,
          stopAction: (() -> Void)? = nil,
-         removeAction: ((DeviceApp) -> Void)? = nil) {
+         removeAction: ((DeviceApp) -> Void)? = nil,
+         fileSize: @escaping (URL) throws -> Int? = { try $0.resourceValues(forKeys: [.fileSizeKey]).fileSize }) {
         self.liveClient = client; self.client = client.snapshot()
         self.launchAction = launchAction; self.stopAction = stopAction
         self.removeAction = removeAction
+        self.fileSize = fileSize
     }
 
     func refresh() async {
@@ -127,7 +130,7 @@ final class DeviceAppsModel {
                 throw BusyBarError(message: "Choose a Busy Bar app package (.tgz or .tar).")
             }
             // Bound memory use before loading a selected file. Firmware validates the archive.
-            let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+            let size = try self.fileSize(url) ?? 0
             guard size <= 100 * 1024 * 1024 else { throw BusyBarError(message: "App packages must be at most 100 MiB.") }
             let host = self.client.host
             let staged = try await self.client.stageApp(Data(contentsOf: url))
