@@ -64,6 +64,7 @@ struct MenuView: View {
                 Text("Message").tag(1)
                 Text("Timers").tag(2)
                 Text("Arcade").tag(3)
+                Text("Apps").tag(5)
                 Text("Settings").tag(4)
             }
             .pickerStyle(.segmented)
@@ -74,7 +75,8 @@ struct MenuView: View {
             case 1: MessageTab()
             case 2: TimersTab()
             case 3: ArcadeTab()
-            default: SettingsTab()
+            case 5: AppsTab()
+            default: ScrollView { SettingsTab() }.frame(height: 500)
             }
 
             if let error = state.lastError {
@@ -90,7 +92,7 @@ struct MenuView: View {
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .padding(14)
-        .frame(width: 340)
+        .frame(width: 400)
         .fixedSize(horizontal: false, vertical: true)
         .background {
             GeometryReader { geometry in
@@ -693,6 +695,7 @@ struct TimersTab: View {
 
 @MainActor
 struct SettingsTab: View {
+    @Environment(\.openWindow) private var openWindow
     @Environment(AppState.self) private var state
     @State private var launchAtLogin = false
     @State private var weatherQuery = ""
@@ -788,6 +791,13 @@ struct SettingsTab: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
 
+            Divider()
+            Button("All Device Controls…") {
+                openWindow(id: "device-tools")
+                NSApp.activate(ignoringOtherApps: true)
+            }
+            Text("Wi-Fi, Bluetooth, storage, firmware, Matter, time and more.")
+                .font(.caption2).foregroundStyle(.secondary)
             Divider()
             Text("Slack").font(.subheadline.bold())
             Toggle("Sync Slack status when busy", isOn: $state.slackSyncEnabled)

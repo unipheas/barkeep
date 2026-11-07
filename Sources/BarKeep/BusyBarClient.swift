@@ -51,16 +51,19 @@ final class BusyBarClient: @unchecked Sendable {
 
     private let session: URLSession
 
-    init(host: String, token: String = "") {
+    init(host: String, token: String = "", session: URLSession? = nil) {
         self.host = Self.normalizedHost(host)
         self.token = token
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 6
-        config.timeoutIntervalForResource = 20
-        self.session = URLSession(configuration: config)
+        config.timeoutIntervalForResource = 180
+        self.session = session ?? URLSession(configuration: config, delegate: NoRedirectDelegate(), delegateQueue: nil)
     }
 
-    private func request(_ method: String, _ path: String, query: [String: String] = [:], body: Data? = nil, contentType: String = "application/json") throws -> URLRequest {
+    func request(_ method: String, _ path: String, query: [String: String] = [:], body: Data? = nil, contentType: String = "application/json") throws -> URLRequest {
+        guard path.hasPrefix("/"), !path.contains(".."), !path.contains("?"), !path.contains("#"), !path.contains("://") else {
+            throw BusyBarError(message: "Invalid local API path")
+        }
         let normalizedHost = Self.normalizedHost(host)
         var components = URLComponents(string: "http://\(normalizedHost)/api\(path)")
         if !query.isEmpty {
@@ -111,7 +114,7 @@ final class BusyBarClient: @unchecked Sendable {
     }
 
     @discardableResult
-    private func send(_ req: URLRequest) async throws -> Data {
+    func send(_ req: URLRequest) async throws -> Data {
         let (data, response) = try await session.data(for: req)
         guard let http = response as? HTTPURLResponse else {
             throw BusyBarError(message: "No HTTP response")
@@ -490,5 +493,15 @@ final class BusyBarClient: @unchecked Sendable {
             contentType: "application/octet-stream"
         )
         try await send(req)
+    }
+}
+
+/// Never forward device credentials or package bodies to a redirect target.
+final class NoRedirectDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest,
+                    completionHandler: @escaping (URLRequest?) -> Void) {
+        completionHandler(nil)
     }
 }

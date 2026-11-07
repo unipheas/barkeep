@@ -355,7 +355,7 @@ final class AppState {
                     try await Task.sleep(for: .seconds(2))
                     let status = try await client.updateStatus()
                     switch status.check.status {
-                    case "ok", "success":
+                    case "available", "not_available", "ok", "success":
                         updateCheckText = status.check.available_version.isEmpty
                             ? "Up to date (\(firmwareVersion ?? "?"))"
                             : "Update available: \(status.check.available_version)"

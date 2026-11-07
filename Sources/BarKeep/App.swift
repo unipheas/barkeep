@@ -19,6 +19,9 @@ struct BarKeepApp: App {
         }
         .menuBarExtraStyle(.window)
 
+        Window("BarKeep Device Controls", id: "device-tools") {
+            DeviceToolsView().environment(state)
+        }
         Window("Busy Bar Canvas", id: "canvas") {
             CanvasView()
                 .environment(state)
