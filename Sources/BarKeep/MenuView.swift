@@ -139,6 +139,7 @@ struct MenuView: View {
                 Image(systemName: "globe")
             }
             .buttonStyle(.borderless)
+            .accessibilityLabel("Open Busy Bar web interface")
             .help("Open the bar's web interface (http://\(BusyBarClient.normalizedHost(state.host)))")
             Button {
                 NSApp.terminate(nil)
@@ -146,6 +147,7 @@ struct MenuView: View {
                 Image(systemName: "power")
             }
             .buttonStyle(.borderless)
+            .accessibilityLabel("Quit BarKeep")
             .help("Quit BarKeep")
         }
     }
@@ -481,6 +483,7 @@ struct MessageTab: View {
                     Text("😀")
                 }
                 .buttonStyle(.borderless)
+                .accessibilityLabel("Insert emoji")
                 .help("Insert emoji")
                 Button {
                     showColorPicker.toggle()
@@ -492,6 +495,7 @@ struct MessageTab: View {
                         .frame(width: 16, height: 16)
                 }
                 .buttonStyle(.borderless)
+                .accessibilityLabel("Message color")
                 .help("Message color")
             }
             if showColorPicker {
@@ -507,6 +511,7 @@ struct MessageTab: View {
                                 .frame(width: 18, height: 18)
                         }
                         .buttonStyle(.borderless)
+                        .accessibilityLabel(preset.name)
                         .help(preset.name)
                     }
                 }
@@ -564,6 +569,8 @@ struct MessageTab: View {
                         Image(systemName: "minus.circle")
                     }
                     .buttonStyle(.borderless)
+                    .accessibilityLabel("Remove preset: \(preset.text)")
+                    .help("Remove preset")
                 }
             }
             Button {

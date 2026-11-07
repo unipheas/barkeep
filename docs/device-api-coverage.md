@@ -94,3 +94,11 @@ Package upload accepts up to 100 MiB, matching `MAX_UPLOAD_FILE_SIZE` in the
 vendor's `applications/services/web_server/http_api/api_apps.c`. Native controls
 and the CLI use the same limit. The settings validation follows the vendor's
 [settings schema](https://developer.busy.app/javascript-applications-settings-schema.html).
+
+Repeatable control-action tests also exercise app refresh/run/stop, preset send/
+remove, busy/timer buttons, USB/Wi-Fi switching, brightness, volume, preference
+persistence and native schema bindings. ViewInspector is pinned as a test-only
+dependency; these tests inspect observable and binding-backed actions. They do
+not replace live testing of SwiftUI-owned state, system dialogs or AppKit focus.
+Local-network permission lifecycle tests use a fake browser to check duplicate
+requests, failure/cancellation cleanup and callbacks from an obsolete probe.

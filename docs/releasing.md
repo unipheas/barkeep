@@ -72,6 +72,11 @@ hardened runtime/timestamp, submits to Apple, staples the ticket, checks
 Gatekeeper acceptance, creates the final ZIP and verifies a fresh extraction.
 The wrapper does not generate or store credentials, create tags, or publish.
 A `*-local-validation.zip` or ad-hoc build is never a production release asset.
+If SSH reports `keychainLocked` after the owner has unlocked the login keychain,
+run the prerequisite check and release wrapper in Nova’s local Terminal session.
+The local session can access the existing credentials without exporting keys or
+changing keychain access permissions. A passing check verifies prerequisites;
+it does not mean the new build has been notarized.
 The full-source Swift coverage gate is not yet satisfied for the firmware 1.3.1
 update. Do not release it until that gate passes. Use a Python environment with
 coverage 7.17.2 for the commands above. Interactive checks and opt-in hardware
