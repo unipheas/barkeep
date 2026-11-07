@@ -1,6 +1,9 @@
 # Native app acceptance and coverage
 
-The ordinary Swift suite uses isolated services and reports all production sources.
+The ordinary Swift suite uses isolated services. The coverage gate reconciles its
+report against the recursive production Swift source inventory. Two generated
+static JSON catalogs have no LLVM executable-line mapping; only their reviewed
+content hashes may be absent. New or changed missing files fail the gate.
 The executable entry point and real native panels additionally require an app host.
 `scripts/test-app-acceptance.py` builds a temporary app with XcodeGen; it does not
 install or replace BarKeep. XcodeGen and an interactive macOS session must already

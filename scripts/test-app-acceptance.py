@@ -25,7 +25,7 @@ if not shutil.which('xcodegen'):
 work = Path(tempfile.mkdtemp(prefix='barkeep-app-acceptance-'))
 print(f'Acceptance artifacts: {work}', flush=True)
 source_hash = hashlib.sha256()
-for source in sorted((root / 'Sources/BarKeep').glob('*.swift')):
+for source in sorted((root / 'Sources/BarKeep').rglob('*.swift')):
     source_hash.update(str(source.relative_to(root)).encode() + b'\0' + source.read_bytes())
 (work / 'source-sha256.txt').write_text(source_hash.hexdigest() + '\n')
 print(f'Production source SHA256: {source_hash.hexdigest()}', flush=True)

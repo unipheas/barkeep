@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def digest():
     value = hashlib.sha256()
-    for source in sorted((ROOT / 'Sources/BarKeep').glob('*.swift')):
+    for source in sorted((ROOT / 'Sources/BarKeep').rglob('*.swift')):
         value.update(str(source.relative_to(ROOT)).encode() + b'\0' + source.read_bytes())
     return value.hexdigest()
 

@@ -30,9 +30,11 @@
 
 The local whole-source gate passed **7,913/7,913 production Swift lines (100%)**
 on Xcode 27.2, combining 194 passing tests and four successful native acceptance
-modes. Every production Swift file remains included. The two opt-in physical
+modes. All production Swift files remain compiled and tracked. LLVM emits no
+executable line mapping for two generated static JSON catalogs; inventory checks
+permit their absence only at reviewed content hashes. The two opt-in physical
 tests were skipped on Nova; earlier MacBook USB firmware 1.3.1 app lifecycle and
-stream tests passed separately. Python MCP/CLI/hooks passed 15 tests with
+stream tests passed separately. Python MCP/CLI/hooks and coverage-inventory validation passed 20 tests with
 **385/385 production statements (100%)**.
 
 Native acceptance verifies startup/quit, actual file panels, Canvas output,
