@@ -59,6 +59,10 @@ final class MenuStateCoverageTests: XCTestCase {
         state.calendarAutoBusy = true
         await Task.yield()
         XCTAssertNotNil(try view.inspect().find(text: "Waiting for calendar access — approve the system prompt."))
+        // Traverse the entire denied-access view, not just the first waiting label.
+        let deniedTexts = try view.inspect().findAll(ViewType.Text.self).map { try $0.string() }
+        XCTAssertFalse(deniedTexts.contains("No upcoming events in the next 24 h."))
+        XCTAssertThrowsError(try view.inspect().find(button: "Countdown on Bar"))
         state.calendarAutoBusy = false
         calendar.allow = true
         state.calendarAutoBusy = true

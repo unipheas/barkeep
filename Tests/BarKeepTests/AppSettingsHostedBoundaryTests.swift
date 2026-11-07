@@ -54,6 +54,7 @@ final class AppSettingsHostedBoundaryTests: XCTestCase {
         var sut = AppSettingsSheet(model: model)
         let inspected = sut.on(\.didAppear) { view in
             let advanced = try view.find(ViewType.DisclosureGroup.self)
+            XCTAssertFalse(try advanced.isExpanded(), "A fresh settings sheet starts with Advanced JSON collapsed")
             try advanced.expand()
             XCTAssertTrue(try advanced.isExpanded())
             try view.find(ViewType.TextEditor.self).setInput(document)
@@ -85,6 +86,7 @@ final class AppSettingsHostedBoundaryTests: XCTestCase {
         await model.loadSettings(try JSONDecoder().decode(DeviceApp.self, from: Data(appFixture.utf8)))
         var sut = AppSettingsSheet(model: model)
         let inspected = sut.on(\.didAppear) { view in
+            XCTAssertThrowsError(try view.find(text: "This replaces all settings with the app's defaults."))
             try view.find(button: "Reset Defaults…").tap()
             XCTAssertNotNil(try view.find(text: "This replaces all settings with the app's defaults."))
             try view.find(button: "Cancel").tap()

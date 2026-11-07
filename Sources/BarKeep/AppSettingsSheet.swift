@@ -11,6 +11,10 @@ struct AppSettingsSheet: View {
     @State private var confirmReset = false
     @State private var advancedSettings = false
 
+    init(model: DeviceAppsModel) {
+        self.model = model
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("\(model.settingsApp?.name ?? "App") Settings").font(.headline)
