@@ -81,6 +81,10 @@ final class IntegrationTests: XCTestCase {
         var seen: [URLRequest] = []
         HTTPStub.handler = { request in
             seen.append(request)
+            if request.url!.path == "/api/audio/volume", request.httpMethod == "POST" {
+                let query = Dictionary(uniqueKeysWithValues: URLComponents(url:request.url!,resolvingAgainstBaseURL:false)!.queryItems!.map { ($0.name,$0.value ?? "") })
+                XCTAssertEqual(query,["volume":"50","silent":"1"],"Firmware requires a numeric silent flag")
+            }
             let result: String
             switch request.url!.path {
             case "/api/status": result = #"{"power":{"state":"charging","battery_charge":100},"firmware":{"version":"1.3.1"}}"#

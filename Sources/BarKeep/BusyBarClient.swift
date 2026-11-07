@@ -472,7 +472,7 @@ final class BusyBarClient: @unchecked Sendable {
     }
 
     func setVolume(_ value: Int) async throws {
-        try await send(try request("POST", "/audio/volume", query: ["volume": String(value), "silent": "true"]))
+        try await send(try request("POST", "/audio/volume", query: ["volume": String(value), "silent": "1"]))
     }
 
     func deviceName() async throws -> String {

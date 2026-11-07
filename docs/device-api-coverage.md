@@ -131,3 +131,10 @@ initialization, discovery of all 16 tools, device status and app listing succeed
 against the connected bar. Existing Homebrew-based MCP configurations keep their
 stable `opt/barkeep-cli` path. Upgrade the formula and restart the MCP client to
 load the new tool catalog; an already-running client retains its old definitions.
+
+A subsequent native volume check found that firmware 1.3.1 rejects the string
+`silent=true`; its query parameter requires the integer `1`. The client now
+sends `silent=1`, with a contract regression test. Setting volume to 40 and
+restoring it to 100 both succeeded in the native UI and were verified with
+GET `/audio/volume`. Live status streaming also started, received packets and
+stopped successfully. The latest CI run before this fix passed all checks.
