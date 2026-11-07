@@ -119,6 +119,169 @@ final class AppStateTests: XCTestCase {
         XCTAssertFalse(app.onCall)
     }
 
+    @MainActor func testCallEndWaitsForPendingCallStart() async throws {
+        for session in ["call","simple","pomodoro"] {
+            let config = URLSessionConfiguration.ephemeral
+            config.protocolClasses = [PendingBusyRequest.self]
+            let app = AppState(defaults:defaults,startServices:false,session:URLSession(configuration:config))
+            let lock = NSLock()
+            var pending: [PendingBusyRequest] = []
+            PendingBusyRequest.arrived = { request in lock.withLock { pending.append(request) } }
+            defer { PendingBusyRequest.arrived = nil }
+            let start: Task<Void,Never>
+            switch session {
+            case "simple": start = app.startSimpleTimer(minutes:5)
+            case "pomodoro": start = app.startPomodoro(workMinutes:25,restMinutes:5,cycles:4)
+            default: start = app.setOnCall(true)
+            }
+            await eventually { lock.withLock { pending.count == 1 } }
+            let stop = app.setOnCall(false)
+            try await Task.sleep(for:.milliseconds(80))
+            XCTAssertEqual(lock.withLock { pending.count },1,"A call end must wait for the pending device write")
+            lock.withLock { pending[0] }.finish()
+            await eventually { lock.withLock { pending.count == 2 } }
+            let second = lock.withLock { pending[1] }
+            let json = try JSONSerialization.jsonObject(with:HTTPStub.body(second.request)) as! [String:Any]
+            XCTAssertEqual((json["snapshot"] as? [String:Any])?["type"] as? String,"NOT_STARTED")
+            second.finish()
+            await start.value; await stop.value
+            XCTAssertFalse(app.onCall)
+            XCTAssertNil(app.lastError)
+        }
+    }
+
+    @MainActor func testBusyFailureRemainsVisibleAfterSuccessfulStatusRefresh() async {
+        let original = HTTPStub.handler!
+        HTTPStub.handler = { request in
+            if request.httpMethod == "PUT" { return (503,Data()) }
+            return try original(request)
+        }
+        let app = state()
+        await app.setOnCall(true).value
+        XCTAssertFalse(app.onCall)
+        XCTAssertTrue(app.deviceReachable)
+        XCTAssertTrue(app.lastError?.contains("503") == true)
+    }
+
+    @MainActor func testConnectionChangeDiscardsQueuedBusyWrites() async {
+        defaults.set("next.test",forKey:"wifiHost")
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [PendingBusyRequest.self]
+        let app = AppState(defaults:defaults,startServices:false,session:URLSession(configuration:config))
+        let lock = NSLock()
+        var pending: [PendingBusyRequest] = []
+        PendingBusyRequest.arrived = { request in
+            if request.request.httpMethod == "PUT" { lock.withLock { pending.append(request) } }
+            else { request.finish() }
+        }
+        defer { PendingBusyRequest.arrived = nil }
+        let start = app.setOnCall(true)
+        await eventually { lock.withLock { pending.count == 1 } }
+        let stop = app.setOnCall(false)
+        app.connectionMode = .wifi
+        lock.withLock { pending[0] }.finish()
+        await start.value; await stop.value
+        await eventually { !app.isConnecting }
+        XCTAssertEqual(lock.withLock { pending.count },1)
+        XCTAssertFalse(app.onCall)
+        let newStart = app.setOnCall(true)
+        await eventually { lock.withLock { pending.count == 2 } }
+        let request = lock.withLock { pending[1] }
+        XCTAssertEqual(request.request.url?.host,"next.test")
+        request.finish()
+        await newStart.value
+        XCTAssertTrue(app.onCall)
+    }
+
+    @MainActor func testCancelledControlWritesDoNotBlockRefreshOrRetainState() async {
+        var app: AppState? = state()
+        weak var released = app
+        let brightness = app!.applyBrightness("75")
+        let volume = app!.applyVolume(50)
+        let busy = app!.setOnCall(true)
+        brightness.cancel(); volume.cancel(); busy.cancel()
+        await brightness.value; await volume.value; await busy.value
+        let original = HTTPStub.handler!
+        HTTPStub.handler = { request in
+            if request.url!.path == "/api/display/brightness" { return (200,Data(#"{"value":"25"}"#.utf8)) }
+            if request.url!.path == "/api/audio/volume" { return (200,Data(#"{"volume":30}"#.utf8)) }
+            return try original(request)
+        }
+        await app!.refreshDeviceStatus()
+        XCTAssertEqual(app!.volumeValue,30)
+        XCTAssertEqual(app!.brightnessValue,"25")
+        app = nil
+        XCTAssertNil(released,"A cancelled operation must release its stored task")
+    }
+
+    @MainActor func testOldStatusRefreshCannotUndoNewBusyWrite() async {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [PendingBusyRequest.self]
+        let app = AppState(defaults:defaults,startServices:false,session:URLSession(configuration:config))
+        let lock = NSLock()
+        var snapshot: PendingBusyRequest?
+        PendingBusyRequest.arrived = { request in
+            switch (request.request.httpMethod,request.request.url!.path) {
+            case ("GET","/api/busy/snapshot"):
+                lock.withLock { snapshot = request }
+            case (_,"/api/status"):
+                request.finish(json:#"{"power":{"state":"charging","battery_charge":90},"firmware":{"version":"1.3.1"}}"#)
+            default: request.finish()
+            }
+        }
+        defer { PendingBusyRequest.arrived = nil }
+        let refresh = Task { await app.refreshDeviceStatus() }
+        await eventually { lock.withLock { snapshot != nil } }
+        await app.setOnCall(true).value
+        XCTAssertTrue(app.onCall)
+        lock.withLock { snapshot }?.finish(json:#"{"snapshot":{"type":"NOT_STARTED"}}"#)
+        await refresh.value
+        XCTAssertTrue(app.onCall,"An older snapshot must not overwrite the completed call-start write")
+    }
+
+    @MainActor func testReadsDuringWritesCannotRollBackCommittedControls() async throws {
+        for path in ["/api/busy/snapshot","/api/display/brightness","/api/audio/volume"] {
+            let config = URLSessionConfiguration.ephemeral
+            config.protocolClasses = [PendingBusyRequest.self]
+            let app = AppState(defaults:defaults,startServices:false,session:URLSession(configuration:config))
+            let lock = NSLock()
+            var pendingWrite: PendingBusyRequest?, pendingRead: PendingBusyRequest?
+            let replies = [
+                "/api/status": #"{"power":{"state":"charging","battery_charge":90},"firmware":{"version":"1.3.1"}}"#,
+                "/api/busy/snapshot": #"{"snapshot":{"type":"NOT_STARTED"}}"#,
+                "/api/display/brightness": #"{"value":"25"}"#,
+                "/api/audio/volume": #"{"volume":30}"#,
+            ]
+            PendingBusyRequest.arrived = { request in
+                if request.request.url!.path == path {
+                    lock.withLock {
+                        if request.request.httpMethod == "GET" { pendingRead = request }
+                        else { pendingWrite = request }
+                    }
+                } else { request.finish(json:replies[request.request.url!.path] ?? "{}") }
+            }
+            defer { PendingBusyRequest.arrived = nil }
+            let write: Task<Void,Never>
+            switch path {
+            case "/api/display/brightness": write = app.applyBrightness("75")
+            case "/api/audio/volume": write = app.applyVolume(80)
+            default: write = app.setOnCall(true)
+            }
+            await eventually { lock.withLock { pendingWrite != nil } }
+            let refresh = Task { await app.refreshDeviceStatus() }
+            await eventually { lock.withLock { pendingRead != nil } }
+            try XCTUnwrap(lock.withLock { pendingWrite }).finish()
+            await write.value
+            try XCTUnwrap(lock.withLock { pendingRead }).finish(json:replies[path]!)
+            await refresh.value
+            switch path {
+            case "/api/display/brightness": XCTAssertEqual(app.brightnessValue,"75")
+            case "/api/audio/volume": XCTAssertEqual(app.volumeValue,80)
+            default: XCTAssertTrue(app.onCall)
+            }
+        }
+    }
+
     @MainActor func testNotificationDoesNotChimeOrReplayOnNewDevice() async {
         for queued in [false,true] {
             defaults.set("usb",forKey:"connectionMode")
@@ -542,4 +705,20 @@ final class AppStateTests: XCTestCase {
     var items: [EKEvent] = []
     func requestAccess() async throws -> Bool { true }
     func events(from: Date, to: Date) -> [EKEvent] { items }
+}
+
+/// Keeps each response pending without blocking URLSession's protocol queue.
+private final class PendingBusyRequest: URLProtocol {
+    static var arrived: ((PendingBusyRequest) -> Void)?
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() { Self.arrived?(self) }
+    override func stopLoading() {}
+    func finish(json: String = "{}") {
+        let data = Data(json.utf8)
+        let response = HTTPURLResponse(url:request.url!,statusCode:200,httpVersion:nil,headerFields:nil)!
+        client?.urlProtocol(self,didReceive:response,cacheStoragePolicy:.notAllowed)
+        client?.urlProtocol(self,didLoad:data)
+        client?.urlProtocolDidFinishLoading(self)
+    }
 }

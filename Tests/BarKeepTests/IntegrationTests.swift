@@ -33,12 +33,23 @@ final class IntegrationTests: XCTestCase {
         let slack = SlackSync(session: HTTPStub.session())
         let empty = await slack.setBusy(true); XCTAssertNil(empty)
         slack.token = "test-token"
+        slack.statusText = "Teams meeting"
+        slack.statusEmoji = ":calendar:"
+        XCTAssertEqual(slack.token,"test-token")
+        XCTAssertEqual(slack.statusText,"Teams meeting")
+        XCTAssertEqual(slack.statusEmoji,":calendar:")
         var methods: [String] = []
         HTTPStub.handler = { request in
             methods.append(request.url!.lastPathComponent)
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer test-token")
             XCTAssertEqual(request.httpMethod, "POST")
             let json = try JSONSerialization.jsonObject(with: HTTPStub.body(request)) as! [String:Any]
+            if request.url!.lastPathComponent == "users.profile.set" {
+                let profile = try XCTUnwrap(json["profile"] as? [String:Any])
+                let starting = methods.count == 1
+                XCTAssertEqual(profile["status_text"] as? String,starting ? "Teams meeting" : "")
+                XCTAssertEqual(profile["status_emoji"] as? String,starting ? ":calendar:" : "")
+            }
             if request.url!.lastPathComponent == "dnd.setSnooze" { XCTAssertEqual(json["num_minutes"] as? Int, 120) }
             if request.url!.lastPathComponent == "dnd.endSnooze" { return (200, Data(#"{"ok":false,"error":"snooze_not_active"}"#.utf8)) }
             return (200, Data(#"{"ok":true}"#.utf8))

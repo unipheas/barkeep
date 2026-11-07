@@ -138,3 +138,13 @@ sends `silent=1`, with a contract regression test. Setting volume to 40 and
 restoring it to 100 both succeeded in the native UI and were verified with
 GET `/audio/volume`. Live status streaming also started, received packets and
 stopped successfully. The latest CI run before this fix passed all checks.
+
+Delayed-response tests reproduced overlapping busy writes and stale status reads.
+Call changes and native timer starts now share one ordered device/Slack queue.
+Switching connections discards queued writes to the old destination. Refreshes
+track changes at both request start and completion, so a read started during a
+write cannot undo its confirmed result. Cancellation releases pending tasks, and
+a successful status refresh no longer hides a failed busy write. All 120 Swift
+tests passed with the optional physical-device tests enabled after these changes.
+Whole-source Swift line coverage for that run was 6,712/7,841 (85.60%); this still
+does not satisfy the 100% release gate.

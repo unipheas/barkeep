@@ -162,6 +162,8 @@ final class AppState {
     private var confirmedVolumeValue = 100
     private var brightnessWriteSequence = 0
     private var volumeWriteSequence = 0
+    private var brightnessMutationRevision = 0
+    private var volumeMutationRevision = 0
     private var brightnessWriteTask: Task<Void, Never>?
     private var volumeWriteTask: Task<Void, Never>?
     private(set) var transportType = "usb"
@@ -205,6 +207,9 @@ final class AppState {
     private var notificationReplayTask: Task<Void, Never>?
     /// True when this app started the busy session (so we only clear our own).
     private var weSetBusy = false
+    private var busyWriteTask: Task<Void, Never>?
+    private var busyWriteSequence = 0
+    private var busyMutationRevision = 0
 
     private static let ledColors: [(match: String, hex: String)] = [
         ("teams", "#7B83EBFF"),
@@ -295,6 +300,7 @@ final class AppState {
     // MARK: - Device status
 
     private func connectionChanged(resetBusyOwnership: Bool = false) {
+        busyWriteTask?.cancel(); busyWriteTask = nil
         if arcade.isActive { arcade.stop() }
         connection.save(to: defaults)
         connectionRevision += 1
@@ -336,8 +342,9 @@ final class AppState {
         // Snapshot the endpoint so an in-flight refresh cannot mix USB and Wi-Fi
         // responses or overwrite the newly selected connection's state.
         let endpoint = client.snapshot()
-        let brightnessRevision = brightnessWriteSequence
-        let volumeRevision = volumeWriteSequence
+        let brightnessRevision = brightnessMutationRevision
+        let volumeRevision = volumeMutationRevision
+        let busyRevision = busyMutationRevision
         isConnecting = true
         defer { if revision == connectionRevision { isConnecting = false } }
         do {
@@ -349,7 +356,9 @@ final class AppState {
             firmwareVersion = status.firmware.version
             let busyType = try await endpoint.currentBusyType()
             guard revision == connectionRevision, !Task.isCancelled else { return }
-            onCall = busyType != "NOT_STARTED"
+            if busyRevision == busyMutationRevision {
+                onCall = busyType != "NOT_STARTED"
+            }
             if onCall, arcade.isActive { arcade.stop() }
             let themes = try? await endpoint.listThemes()
             let brightness = try? await endpoint.brightness()
@@ -358,10 +367,10 @@ final class AppState {
             let name = try? await endpoint.deviceName()
             guard revision == connectionRevision, !Task.isCancelled else { return }
             if let themes, !themes.isEmpty { availableThemes = themes }
-            if let brightness, brightnessRevision == brightnessWriteSequence, brightnessWriteTask == nil {
+            if let brightness, brightnessRevision == brightnessMutationRevision, brightnessWriteTask == nil {
                 brightnessValue = brightness; confirmedBrightnessValue = brightness
             }
-            if let volume, volumeRevision == volumeWriteSequence, volumeWriteTask == nil {
+            if let volume, volumeRevision == volumeMutationRevision, volumeWriteTask == nil {
                 volumeValue = volume; confirmedVolumeValue = volume
             }
             if let wifiState { wifiStateText = wifiState }
@@ -438,14 +447,18 @@ final class AppState {
         let revision = connectionRevision
         let endpoint = client.snapshot()
         brightnessWriteSequence += 1
+        brightnessMutationRevision += 1
         let sequence = brightnessWriteSequence
         let previousTask = brightnessWriteTask
         brightnessValue = value
         let task = Task {
             // Serialize writes and skip superseded selections that have not started.
             await previousTask?.value
+            defer {
+                brightnessMutationRevision += 1
+                if sequence == brightnessWriteSequence { brightnessWriteTask = nil }
+            }
             guard revision == connectionRevision, sequence == brightnessWriteSequence, !Task.isCancelled else { return }
-            defer { if sequence == brightnessWriteSequence { brightnessWriteTask = nil } }
             do {
                 try await endpoint.setBrightness(value)
                 guard revision == connectionRevision, !Task.isCancelled else { return }
@@ -467,14 +480,18 @@ final class AppState {
         let revision = connectionRevision
         let endpoint = client.snapshot()
         volumeWriteSequence += 1
+        volumeMutationRevision += 1
         let sequence = volumeWriteSequence
         let previousTask = volumeWriteTask
         volumeValue = value
         let task = Task {
             // Serialize writes and skip superseded selections that have not started.
             await previousTask?.value
+            defer {
+                volumeMutationRevision += 1
+                if sequence == volumeWriteSequence { volumeWriteTask = nil }
+            }
             guard revision == connectionRevision, sequence == volumeWriteSequence, !Task.isCancelled else { return }
-            defer { if sequence == volumeWriteSequence { volumeWriteTask = nil } }
             do {
                 try await endpoint.setVolume(value)
                 guard revision == connectionRevision, !Task.isCancelled else { return }
@@ -542,10 +559,9 @@ final class AppState {
 
     // MARK: - Timers
 
-    func startPomodoro(workMinutes: Int, restMinutes: Int, cycles: Int) {
-        let revision = connectionRevision
-        let endpoint = client.snapshot()
-        Task {
+    @discardableResult
+    func startPomodoro(workMinutes: Int, restMinutes: Int, cycles: Int) -> Task<Void, Never> {
+        enqueueBusyWrite { [self] endpoint, revision in
             do {
                 await arcade.stopAndWait()
                 try await endpoint.startIntervalSession(
@@ -564,10 +580,9 @@ final class AppState {
         }
     }
 
-    func startSimpleTimer(minutes: Int) {
-        let revision = connectionRevision
-        let endpoint = client.snapshot()
-        Task {
+    @discardableResult
+    func startSimpleTimer(minutes: Int) -> Task<Void, Never> {
+        enqueueBusyWrite { [self] endpoint, revision in
             do {
                 await arcade.stopAndWait()
                 try await endpoint.startSimpleSession(minutes: minutes, theme: theme, triggerSmartHome: triggerSmartHome)
@@ -784,11 +799,31 @@ final class AppState {
         return nil
     }
 
-    @discardableResult
-    func setOnCall(_ on: Bool, automatic: Bool = false) -> Task<Void, Never> {
+    private func enqueueBusyWrite(_ operation: @escaping @MainActor (BusyBarClient, Int) async -> Void) -> Task<Void, Never> {
         let revision = connectionRevision
         let endpoint = client.snapshot()
-        return Task {
+        let previous = busyWriteTask
+        busyWriteSequence += 1
+        busyMutationRevision += 1
+        let sequence = busyWriteSequence
+        let task = Task {
+            // Finish each device + Slack transition before the next one starts.
+            // Otherwise a slow call-start response can overtake a call end.
+            await previous?.value
+            defer {
+                busyMutationRevision += 1
+                if sequence == busyWriteSequence { busyWriteTask = nil }
+            }
+            guard !Task.isCancelled, revision == connectionRevision else { return }
+            await operation(endpoint, revision)
+        }
+        busyWriteTask = task
+        return task
+    }
+
+    @discardableResult
+    func setOnCall(_ on: Bool, automatic: Bool = false) -> Task<Void, Never> {
+        enqueueBusyWrite { [self] endpoint, revision in
             do {
                 if on, arcade.isActive {
                     arcade.stop()
@@ -820,8 +855,10 @@ final class AppState {
                 }
             } catch {
                 guard revision == connectionRevision else { return }
-                lastError = error.localizedDescription
+                let failure = error.localizedDescription
                 await refreshDeviceStatus()
+                guard revision == connectionRevision else { return }
+                lastError = failure
             }
         }
     }
