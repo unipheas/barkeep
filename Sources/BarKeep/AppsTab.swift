@@ -121,7 +121,13 @@ struct AppsContent: View {
                     Button("Reset Defaults…") { confirmReset = true }
                     Spacer()
                     Button("Done") { model.closeSettings() }
-                    Button("Save") { Task { await model.saveSettings() } }.buttonStyle(.borderedProminent)
+                    Button("Save") {
+                        NSApp.keyWindow?.endEditing(for: nil)
+                        Task {
+                            await Task.yield()
+                            await model.saveSettings()
+                        }
+                    }.buttonStyle(.borderedProminent)
                 }
             }.padding(20).frame(width: 470).disabled(model.working)
                 .alert("Reset app settings?", isPresented: $confirmReset) {

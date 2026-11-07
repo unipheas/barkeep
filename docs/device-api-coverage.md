@@ -82,3 +82,15 @@ as GRB instead of the vendor's BGR; the preview now uses BGR and rear-screen L4
 frames are expanded correctly. Regression tests check both formats. The live
 retest showed a continuous red stroke matching the canvas. Emoji search,
 rendered-image delivery, and temporary preset creation/removal also passed.
+
+The expanded QA schema was also tested through the native editor: boolean,
+integer, enum, color, time and nested string changes were saved and verified by
+reading them back from the device. Reset restored every default. Invalid values
+now receive field-specific validation before upload (including integer bounds,
+UTF-8 string byte lengths, enum options, color/time formats and schema version).
+Unsupported future field types remain available through Advanced JSON.
+
+Package upload accepts up to 100 MiB, matching `MAX_UPLOAD_FILE_SIZE` in the
+vendor's `applications/services/web_server/http_api/api_apps.c`. Native controls
+and the CLI use the same limit. The settings validation follows the vendor's
+[settings schema](https://developer.busy.app/javascript-applications-settings-schema.html).

@@ -9,9 +9,63 @@ struct AppSettingsSchema: Decodable {
         let options: [Option]?
         let sensitive: Bool?
         let fields: [String: Field]?
+        let min: Int?
+        let max: Int?
+        let min_length: Int?
+        let max_length: Int?
     }
     let version: Int
     let fields: [String: Field]
+
+    func validate(_ json: String) throws {
+        guard let root = try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any],
+              (root["version"] as? Int) == version,
+              let values = root["values"] as? [String: Any] else {
+            throw BusyBarError(message: "Keep settings version \(version) and the complete values document.")
+        }
+        try Self.validate(fields, values: values)
+    }
+
+    private static func validate(_ fields: [String: Field], values: [String: Any]) throws {
+        for key in fields.keys.sorted() {
+            let field = fields[key]!
+            let value = values[key]
+            func rejection(_ reason: String) -> BusyBarError {
+                BusyBarError(message: "\(field.label): \(reason)")
+            }
+            switch field.type {
+            case "group":
+                guard let nested = value as? [String: Any] else { throw rejection("keep the complete group.") }
+                try validate(field.fields ?? [:], values: nested)
+            case "boolean":
+                guard let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else {
+                    throw rejection("choose enabled or disabled.")
+                }
+            case "integer":
+                let lower = field.min ?? Int(Int32.min), upper = field.max ?? Int(Int32.max)
+                guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
+                      number.doubleValue.rounded() == number.doubleValue,
+                      number.doubleValue >= Double(lower), number.doubleValue <= Double(upper) else {
+                    throw rejection("enter a whole number from \(lower) to \(upper).")
+                }
+            case "enum":
+                guard let text = value as? String, field.options?.contains(where: { $0.value == text }) == true else {
+                    throw rejection("choose one of the listed options.")
+                }
+            case "string":
+                let lower = field.min_length ?? 0, upper = field.max_length ?? 64
+                guard let text = value as? String, (lower...Swift.max(lower, upper)).contains(text.utf8.count) else {
+                    throw rejection("enter text between \(lower) and \(upper) UTF-8 bytes.")
+                }
+            case "color", "time":
+                let pattern = field.type == "color" ? "^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$" : "^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$"
+                guard let text = value as? String, text.range(of:pattern,options:.regularExpression) != nil else {
+                    throw rejection(field.type == "color" ? "use #RRGGBB or #RRGGBBAA." : "use HH:MM or HH:MM:SS (24-hour time).")
+                }
+            default: break // Preserve future field types for firmware validation.
+            }
+        }
+    }
 }
 
 /// Preserve the complete document while editing a single nested value.

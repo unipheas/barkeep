@@ -159,8 +159,8 @@ def package_bytes(path):
     file = Path(path).expanduser()
     if file.suffix.lower() not in (".tgz", ".tar", ".gz"):
         raise ValueError("Choose a .tgz or .tar app package")
-    if not 0 < file.stat().st_size <= 64 * 1024 * 1024:
-        raise ValueError("App package must contain 1 byte to 64 MB")
+    if not 0 < file.stat().st_size <= 100 * 1024 * 1024:
+        raise ValueError("App package must contain 1 byte to 100 MiB")
     return file.read_bytes()
 
 

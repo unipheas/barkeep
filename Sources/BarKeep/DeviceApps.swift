@@ -128,7 +128,7 @@ final class DeviceAppsModel {
             }
             // Bound memory use before loading a selected file. Firmware validates the archive.
             let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-            guard size <= 64 * 1024 * 1024 else { throw BusyBarError(message: "App packages must be under 64 MB.") }
+            guard size <= 100 * 1024 * 1024 else { throw BusyBarError(message: "App packages must be at most 100 MiB.") }
             let host = self.client.host
             let staged = try await self.client.stageApp(Data(contentsOf: url))
             guard host == self.liveClient.host, self.client.token == self.liveClient.token else { throw BusyBarError(message: "Device changed during upload. Upload again.") }
@@ -199,6 +199,7 @@ final class DeviceAppsModel {
     func saveSettings() async {
         guard let app = settingsApp else { return }
         await perform {
+            try self.settingsSchema?.validate(self.settingsJSON)
             try await self.client.saveAppSettings(id: app.id, json: self.settingsJSON)
             self.settingsJSON = try await self.client.appSettings(id: app.id)
             self.message = "Saved \(app.name) settings. Relaunch the app to apply them."

@@ -208,24 +208,29 @@ final class AppStateTests: XCTestCase {
             let app = state()
             app.offDebounceSeconds = 0
             let pending = expectation(description:"Busy request pending")
+            let release = DispatchSemaphore(value:0)
+            let lock = NSLock()
+            defer { release.signal() }
             var writes = 0
             HTTPStub.handler = { request in
                 if request.url!.path == "/api/busy/snapshot" {
                     if request.httpMethod == "GET" {
-                        if !duringWrite { pending.fulfill(); Thread.sleep(forTimeInterval:0.05) }
+                        if !duringWrite { pending.fulfill(); _ = release.wait(timeout:.now()+5) }
                         return (200,Data(#"{"snapshot":{"type":"NOT_STARTED"}}"#.utf8))
                     }
-                    writes += 1
-                    if duringWrite && writes == 1 { pending.fulfill(); Thread.sleep(forTimeInterval:0.05) }
+                    let count = lock.withLock { writes += 1; return writes }
+                    if duringWrite && count == 1 { pending.fulfill(); _ = release.wait(timeout:.now()+5) }
                 }
                 return (200,Data("{}".utf8))
             }
-            app.micStateChanged(.init(isInUse:true,deviceNames:[]))
-            await fulfillment(of:[pending],timeout:1)
+            let transition = app.micStateChanged(.init(isInUse:true,deviceNames:[]))
+            await fulfillment(of:[pending],timeout:3)
             app.micStateChanged(.init(isInUse:false,deviceNames:[]))
-            try? await Task.sleep(for:.milliseconds(120))
+            release.signal()
+            await transition?.value
+            if duringWrite { await eventually { !app.onCall && lock.withLock { writes == 2 } } }
             XCTAssertFalse(app.onCall)
-            XCTAssertEqual(writes,duringWrite ? 2 : 0)
+            XCTAssertEqual(lock.withLock { writes },duringWrite ? 2 : 0)
         }
     }
 

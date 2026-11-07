@@ -18,6 +18,22 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(AppSettingsDocument.value(in:created,at:["new","setting"]) as? String,"hello")
     }
 
+    func testSchemaValidationReportsInvalidFieldsAndPreservesUnknownValues() throws {
+        let schemaJSON = #"{"version":2,"fields":{"enabled":{"type":"boolean","label":"Enabled"},"count":{"type":"integer","label":"Count","min":0,"max":10},"label":{"type":"string","label":"Label","max_length":4},"format":{"type":"enum","label":"Format","options":[{"value":"a","label":"Alpha"}]},"color":{"type":"color","label":"Color"},"time":{"type":"time","label":"Time"},"group":{"type":"group","label":"Group","fields":{"name":{"type":"string","label":"Name"}}},"future":{"type":"future","label":"Future"}}}"#
+        let schema = try JSONDecoder().decode(AppSettingsSchema.self,from:Data(schemaJSON.utf8))
+        let good = ##"{"version":2,"values":{"enabled":true,"count":7,"label":"éé","format":"a","color":"#00FF00","time":"13:45:00","group":{"name":"Nested"},"future":{"unknown":"retained"}}}"##
+        XCTAssertNoThrow(try schema.validate(good))
+        for (path,value,label) in [(["enabled"],1 as Any,"Enabled"),(["count"],99,"Count"),(["count"],true,"Count"),(["count"],1.5,"Count"),(["label"],"ééé","Label"),(["format"],"missing","Format"),(["color"],"blue","Color"),(["time"],"25:00","Time"),(["group"],"bad","Group"),(["group","name"],false,"Name")] {
+            let bad = try AppSettingsDocument.replacing(in:good,at:path,value:value)
+            XCTAssertThrowsError(try schema.validate(bad)) { XCTAssertTrue($0.localizedDescription.contains(label)) }
+        }
+        XCTAssertThrowsError(try schema.validate("{}"))
+        XCTAssertThrowsError(try schema.validate("bad json"))
+        let unrestricted = try JSONDecoder().decode(AppSettingsSchema.self,from:Data(#"{"version":1,"fields":{"count":{"type":"integer","label":"Count"}}}"#.utf8))
+        XCTAssertNoThrow(try unrestricted.validate(#"{"version":1,"values":{"count":-2147483648}}"#))
+        XCTAssertThrowsError(try unrestricted.validate(#"{"version":1,"values":{"count":2147483648}}"#))
+    }
+
     @MainActor func testSchemaBackedEditorLoadsEveryFieldKind() async throws {
         let schemaJSON = #"{"version":1,"fields":{"flag":{"type":"boolean","label":"Enabled","description":"Test flag"},"count":{"type":"integer","label":"Count"},"choice":{"type":"enum","label":"Format","options":[{"value":"a","label":"A"}]},"secret":{"type":"string","label":"Secret","sensitive":true},"time":{"type":"time","label":"Time"},"color":{"type":"color","label":"Color"},"location":{"type":"geolocation","label":"Location"},"group":{"type":"group","label":"Group","fields":{"name":{"type":"string","label":"Name"}}}}}"#
         let schema = try JSONDecoder().decode(AppSettingsSchema.self,from:Data(schemaJSON.utf8))

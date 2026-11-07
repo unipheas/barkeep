@@ -706,35 +706,40 @@ final class AppState {
 
     // MARK: - On-call logic
 
-    func micStateChanged(_ activity: MicMonitor.Activity) {
+    @discardableResult
+    func micStateChanged(_ activity: MicMonitor.Activity) -> Task<Void, Never>? {
         micInUse = activity.isInUse
         activeMicrophoneNames = activity.deviceNames
-        guard autoOnCall else { return }
-        syncAutoBusy()
+        guard autoOnCall else { return nil }
+        return syncAutoBusy()
     }
 
     private var wantAutoBusy: Bool {
         (autoOnCall && micInUse) || (calendarAutoBusy && inMeeting)
     }
 
-    private func syncAutoBusy() {
+    @discardableResult
+    private func syncAutoBusy() -> Task<Void, Never>? {
         offDebounceTask?.cancel()
         if wantAutoBusy {
-            setOnCall(true, automatic: true)
+            return setOnCall(true, automatic: true)
         } else if weSetBusy {
             let delay = offDebounceSeconds
             offDebounceTask = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(delay))
                 guard !Task.isCancelled, let self, !self.wantAutoBusy else { return }
-                self.setOnCall(false, automatic: true)
+                await self.setOnCall(false, automatic: true).value
             }
+            return offDebounceTask
         }
+        return nil
     }
 
-    func setOnCall(_ on: Bool, automatic: Bool = false) {
+    @discardableResult
+    func setOnCall(_ on: Bool, automatic: Bool = false) -> Task<Void, Never> {
         let revision = connectionRevision
         let endpoint = client.snapshot()
-        Task {
+        return Task {
             do {
                 if on, arcade.isActive {
                     arcade.stop()

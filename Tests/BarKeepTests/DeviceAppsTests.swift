@@ -132,9 +132,9 @@ final class DeviceAppsTests: XCTestCase {
         try Data([1]).write(to:file)
         defer { try? FileManager.default.removeItem(at:file) }
         let handle = try FileHandle(forWritingTo:file)
-        try handle.truncate(atOffset:64*1024*1024+1); try handle.close()
+        try handle.truncate(atOffset:100*1024*1024+1); try handle.close()
         await model.stage(url:file)
-        XCTAssertTrue(model.error!.contains("64 MB"))
+        XCTAssertTrue(model.error!.contains("100 MiB"))
         try Data([1]).write(to:file)
         let started = expectation(description:"Stage in flight")
         HTTPStub.handler = { _ in
