@@ -1,6 +1,18 @@
 import XCTest
 
 final class SceneAcceptanceTests: XCTestCase {
+    private func reveal(_ element: XCUIElement, in scroll: XCUIElement) {
+        XCTAssertTrue(element.waitForExistence(timeout: 5))
+        XCTAssertTrue(scroll.exists)
+        for _ in 0..<8 {
+            if scroll.frame.contains(element.frame) && element.isHittable { break }
+            scroll.scroll(byDeltaX: 0, deltaY: -100)
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        XCTAssertTrue(scroll.frame.contains(element.frame))
+        XCTAssertTrue(element.isHittable)
+    }
+
     func testIsolatedLoginItemRegistrationAndRemoval() throws {
         let environment = ProcessInfo.processInfo.environment
         try XCTSkipUnless(environment["BARKEEP_ACCEPTANCE_LOGIN"] == "1")
@@ -43,6 +55,7 @@ final class SceneAcceptanceTests: XCTestCase {
         let toggle = controls.checkBoxes["Launch at login"]
         XCTAssertTrue(toggle.waitForExistence(timeout: 5))
         guard toggle.exists else { return }
+        reveal(toggle, in: controls.scrollViews.firstMatch)
         XCTContext.runActivity(named: "Attempt one login registration for \(expectedID)") { _ in
             toggle.click() // Exactly one registration attempt, never approve any system prompt.
         }
@@ -96,7 +109,9 @@ final class SceneAcceptanceTests: XCTestCase {
         }
         XCTAssertTrue(try String(contentsOf: log).contains("GET /api/status"))
         controls.descendants(matching: .any).matching(identifier: "Settings").firstMatch.click()
-        controls.buttons["All Device Controls…"].click()
+        let deviceControls = controls.buttons["All Device Controls…"]
+        reveal(deviceControls, in: controls.scrollViews.firstMatch)
+        deviceControls.click()
         let tools = app.windows["BarKeep Device Controls"]
         XCTAssertTrue(tools.waitForExistence(timeout: 5))
         guard tools.exists else { return }
@@ -114,11 +129,15 @@ final class SceneAcceptanceTests: XCTestCase {
         guard save.isEnabled else { return }
         save.click()
         app.typeKey("g", modifierFlags: [.command, .shift])
-        app.typeText(artifacts)
-        app.typeKey(.return, modifierFlags: [])
+        let path = app.textFields["PathTextField"]
+        XCTAssertTrue(path.waitForExistence(timeout: 5))
+        path.click()
+        path.typeKey("a", modifierFlags: .command)
+        path.typeText(artifacts)
+        path.typeKey(.return, modifierFlags: [])
         let confirm = app.buttons["Save"].firstMatch
-        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
-        guard confirm.exists else { return }
+        expectation(for: NSPredicate(format: "exists == true AND enabled == true"), evaluatedWith: confirm)
+        waitForExpectations(timeout: 5)
         confirm.click()
         let saved = URL(fileURLWithPath: artifacts + "/busy-bar-status.json")
         defer { try? FileManager.default.removeItem(at: saved) }
@@ -130,6 +149,10 @@ final class SceneAcceptanceTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: saved), expected)
         tools.buttons["Stop Stream"].click()
         XCTAssertTrue(tools.buttons["Start Stream"].waitForExistence(timeout: 5))
+        tools.buttons[XCUIIdentifierCloseWindow].click()
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: tools)
+        waitForExpectations(timeout: 5)
+        XCTAssertTrue(controls.buttons["Quit BarKeep"].isHittable)
         controls.buttons["Quit BarKeep"].click()
         XCTAssertTrue(app.wait(for: .notRunning, timeout: 5))
     }
@@ -265,11 +288,15 @@ final class SceneAcceptanceTests: XCTestCase {
         saveCancel.click()
         save.click()
         app.typeKey("g", modifierFlags: [.command, .shift])
-        app.typeText(artifacts)
-        app.typeKey(.return, modifierFlags: [])
+        let path = app.textFields["PathTextField"]
+        XCTAssertTrue(path.waitForExistence(timeout: 5))
+        path.click()
+        path.typeKey("a", modifierFlags: .command)
+        path.typeText(artifacts)
+        path.typeKey(.return, modifierFlags: [])
         let saveConfirm = app.buttons["Save"].firstMatch
-        XCTAssertTrue(saveConfirm.waitForExistence(timeout: 5))
-        guard saveConfirm.exists else { return }
+        expectation(for: NSPredicate(format: "exists == true AND enabled == true"), evaluatedWith: saveConfirm)
+        waitForExpectations(timeout: 5)
         saveConfirm.click()
         let exportedURL = URL(fileURLWithPath: artifacts + "/busy-bar-response")
         defer { try? FileManager.default.removeItem(at: exportedURL) }
