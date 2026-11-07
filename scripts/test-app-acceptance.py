@@ -167,7 +167,7 @@ if ui_mode:
                 '-scheme', 'BarKeepAcceptance', '-configuration', 'Debug',
                 '-derivedDataPath', str(work / 'build'), '-destination', 'platform=macOS',
                 '-resultBundlePath', str(work / 'ui-results.xcresult'), 'test'],
-                stdout=output, stderr=subprocess.STDOUT, timeout=120, check=True)
+                stdout=output, stderr=subprocess.STDOUT, timeout=300, check=True)
     finally:
         if login:
             cleanup = work / 'login-cleanup.json'

@@ -313,7 +313,19 @@ final class SceneAcceptanceTests: XCTestCase {
         XCTAssertTrue(toolsWindow.staticTexts["fixture.tgz"].waitForExistence(timeout: 5))
         XCTAssertEqual(try requestRecords().filter { $0["path"] == "/api/assets/upload" }.count, uploadsBeforeSelection, "Choosing a file must not submit the API action")
         // Never press Apply to Bar: selecting a fixture is the entire authorized action.
-        controls.buttons["Quit BarKeep"].click()
+        // Child windows can cover the controls on CI's smaller display. Close
+        // our own windows through their native controls before naturally quitting.
+        toolsWindow.buttons[XCUIIdentifierCloseWindow].click()
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: toolsWindow)
+        waitForExpectations(timeout: 5)
+        if canvasWindow.exists {
+            canvasWindow.buttons[XCUIIdentifierCloseWindow].click()
+            expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: canvasWindow)
+            waitForExpectations(timeout: 5)
+        }
+        let quit = controls.buttons["Quit BarKeep"]
+        XCTAssertTrue(quit.isHittable)
+        quit.click()
         XCTAssertTrue(app.wait(for: .notRunning, timeout: 5))
     }
 }
