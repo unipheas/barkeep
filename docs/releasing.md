@@ -80,8 +80,8 @@ run the prerequisite check and release wrapper in Nova’s local Terminal sessio
 The local session can access the existing credentials without exporting keys or
 changing keychain access permissions. A passing check verifies prerequisites;
 it does not mean the new build has been notarized.
-The full-source Swift coverage gate is not yet satisfied for the firmware 1.3.1
-update. Do not release it until that gate passes. Use a Python environment with
+The full-source Swift coverage gate must pass on the intended release source
+snapshot. A past report does not authorize releasing a changed source tree. Use a Python environment with
 coverage 7.17.2 for the commands above. On Nova, the default Xcode `python3`
 may be Python 3.9, which cannot install that coverage version. Use the installed
 Homebrew Python 3.13 in an isolated virtual environment, install

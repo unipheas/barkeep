@@ -1,6 +1,4 @@
-# BarKeep 1.1.0 — release candidate
-
-Not published. The requested 100% Swift coverage gate remains unmet.
+# BarKeep 1.1.0
 
 ## New
 
@@ -24,14 +22,25 @@ Not published. The requested 100% Swift coverage gate remains unmet.
   discards queued writes for the previous connection.
 - Notification queues remain bound to their original device.
 - Calendar changes with unchanged event IDs refresh correctly.
+- Non-RGB colors fall back safely instead of raising a conversion exception.
+- Missing device/request URLs reject before transport.
+- Cancelled Arcade uploads are not counted as connection failures.
 
 ## Validation and limits
 
-120 Swift tests passed on November 7, 2026, including the opt-in physical-device
-app lifecycle and status stream tests. Whole-source Swift line coverage from
-that run was 85.60% (6,712/7,841). The last Python coverage run covered all
-385 production statements across MCP/CLI and hooks. Native UI checks are
-detailed in [device-api-coverage.md](device-api-coverage.md).
+The local whole-source gate passed **7,913/7,913 production Swift lines (100%)**
+on Xcode 27.2, combining 194 passing tests and four successful native acceptance
+modes. Every production Swift file remains included. The two opt-in physical
+tests were skipped on Nova; earlier MacBook USB firmware 1.3.1 app lifecycle and
+stream tests passed separately. Python MCP/CLI/hooks passed 15 tests with
+**385/385 production statements (100%)**.
+
+Native acceptance verifies startup/quit, actual file panels, Canvas output,
+Arcade focus/cancellation, loopback WebSocket decoding and native export, and
+isolated Login Items registration/removal with verified cleanup. Simulated
+platform failure tests verify error handling, not an actual OS failure. See
+[app-acceptance-testing.md](app-acceptance-testing.md) and
+[device-api-coverage.md](device-api-coverage.md) for scope and limitations.
 
 Teams uses microphone detection and Notification Center forwarding; Graph
 presence sync is not included. Slack and calendar automation use controlled
@@ -40,6 +49,3 @@ fixtures in the automated suite, not live personal accounts.
 Firmware 1.3.1 may acknowledge app Stop before its script is released. A rapid
 Remove can fail with HTTP 508 and leave partial files. BarKeep reconciles the
 app list and displays that failure rather than reporting success.
-
-This candidate is not a 100%-coverage or issue-free production certification.
-Do not publish until the outstanding release requirement is resolved.
