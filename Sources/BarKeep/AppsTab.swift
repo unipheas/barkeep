@@ -3,6 +3,9 @@ import UniformTypeIdentifiers
 
 @MainActor
 struct AppsTab: View {
+    #if DEBUG
+    internal var didAppear: ((Self) -> Void)?
+    #endif
     @Environment(AppState.self) private var state
     @State private var model: DeviceAppsModel?
 
@@ -19,6 +22,9 @@ struct AppsTab: View {
             self.model = model
             await model.refresh()
         }
+        #if DEBUG
+        .onAppear { didAppear?(self) }
+        #endif
     }
 }
 

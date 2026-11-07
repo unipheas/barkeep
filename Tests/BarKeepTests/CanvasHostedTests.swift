@@ -12,6 +12,21 @@ final class CanvasHostedTests: XCTestCase {
         try await verifyCanvasOutput(clearBeforeSending: true)
     }
 
+    @MainActor func testBusySessionDisablesSendingAndShowsError() async throws {
+        let suite = "dev.barkeep.canvas-busy.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite); HTTPStub.handler = nil }
+        HTTPStub.handler = { _ in (200, Data("{}".utf8)) }
+        let state = AppState(defaults: defaults, startServices: false, session: HTTPStub.session())
+        await state.setOnCall(true).value
+        state.lastError = "Fixture display failure"
+        let view = CanvasView().environment(state)
+        XCTAssertTrue(try view.inspect().find(button: "Send to Bar").isDisabled())
+        XCTAssertNotNil(try view.inspect().find(text: "Fixture display failure"))
+        XCTAssertNotNil(try view.inspect().find(ViewType.Text.self, where: { try $0.string().hasPrefix("Sending is unavailable") }))
+        await state.setOnCall(false).value
+    }
+
     @MainActor private func verifyCanvasOutput(clearBeforeSending: Bool) async throws {
         let suite = "dev.barkeep.canvas-hosted.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
@@ -65,6 +80,10 @@ final class CanvasHostedTests: XCTestCase {
             try gesture.callOnChanged(value: sample(1, 10000))
             if clearBeforeSending { try view.find(button: "Clear Canvas").tap() }
             try view.find(ViewType.Picker.self).select(value: 120)
+            var renderedView = try view.actualView()
+            renderedView.didAppear = nil
+            let renderer = ImageRenderer(content: renderedView.environment(state))
+            XCTAssertNotNil(renderer.cgImage, "Painted canvas must render to an image")
             try view.find(button: "Send to Bar").tap()
         }
         ViewHosting.host(view: sut.environment(state))

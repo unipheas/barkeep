@@ -86,20 +86,27 @@ final class StatusStreamRecoveryTests: XCTestCase {
 }
 
 private final class RecoverySocket: StatusSocket {
+    private let lock = NSLock()
     private var continuation: CheckedContinuation<Data, Error>?
     private let enableError: Error?
-    var closed = false
-    var waiting: Bool { continuation != nil }
+    private var didClose = false
+    var closed: Bool { lock.withLock { didClose } }
+    var waiting: Bool { lock.withLock { continuation != nil } }
     init(enableError: Error? = nil) { self.enableError = enableError }
     func start() {}
     func enable() async throws { if let enableError { throw enableError } }
     func receive() async throws -> Data {
-        try await withCheckedThrowingContinuation { continuation = $0 }
+        try await withCheckedThrowingContinuation { pending in
+            lock.withLock { continuation = pending }
+        }
     }
-    func close() { closed = true }
+    func close() { lock.withLock { didClose = true } }
     func finish(data: Data? = nil, error: Error = CancellationError()) {
-        let pending = continuation
-        continuation = nil
+        let pending = lock.withLock {
+            let pending = continuation
+            continuation = nil
+            return pending
+        }
         if let data { pending?.resume(returning: data) }
         else { pending?.resume(throwing: error) }
     }

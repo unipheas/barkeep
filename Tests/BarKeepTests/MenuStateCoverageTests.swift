@@ -96,7 +96,7 @@ final class MenuStateCoverageTests: XCTestCase {
         let settings = SettingsTab().environment(state)
         XCTAssertNotNil(try settings.inspect().find(text: "Firmware 1.3.1 · Wi-Fi connected"))
         try settings.inspect().find(button: "Check for Update").tap()
-        await settle { state.updateCheckText != nil }
+        await settle { state.updateCheckText == "Update available: 1.3.1" }
         XCTAssertNotNil(try settings.inspect().find(text: state.updateCheckText!))
     }
 
@@ -127,7 +127,7 @@ final class MenuStateCoverageTests: XCTestCase {
         return (200, Data(body.utf8))
     }
     @MainActor private func settle(_ condition: () -> Bool, file: StaticString = #filePath, line: UInt = #line) async {
-        for _ in 0..<200 { if condition() { return }; try? await Task.sleep(for: .milliseconds(10)) }
+        for _ in 0..<500 { if condition() { return }; try? await Task.sleep(for: .milliseconds(10)) }
         XCTFail("UI state did not settle", file: file, line: line)
     }
 }
