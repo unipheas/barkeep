@@ -3,8 +3,12 @@ import SwiftUI
 @MainActor
 struct StatusStreamView: View {
     @Environment(AppState.self) private var state
-    @State private var model = StatusStreamModel()
+    @State private var model: StatusStreamModel
     @State private var saveError: String?
+    init(model: StatusStreamModel? = nil) {
+        _model = State(initialValue: model ?? StatusStreamModel())
+    }
+
     var body: some View {
         VStack(alignment:.leading,spacing:12) {
             Text("Live Device Status").font(.title2.bold())

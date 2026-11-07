@@ -113,3 +113,21 @@ BarKeep widgets. Tests cover both responses. The hardware lifecycle test ignores
 the launcher splash and allows a one-second shutdown interval between Stop and
 Remove; this passed on the connected device. The temporary QA residue from the
 failed run was removed explicitly, and the original three apps remained intact.
+
+The settings sheet now has direct action tests for validation, Save, complete
+JSON preservation and Done. Device-control tests cover required-input errors,
+confirmation, request values, response rendering and export availability; stream
+control tests cover Start, Stop, decoded packets, connection errors and cleanup.
+Window-resize tests check anchoring, repeated notifications and observer removal.
+
+Rapid brightness/volume changes revealed a stale-error rollback: a failed older
+request could undo a newer selection. Writes now run in order, skip queued values
+that have been superseded, and roll back only to the last confirmed device value.
+A status refresh cannot overwrite selections made after that refresh started.
+Regression tests reproduce the original failure and check coalescing/rollback.
+
+The new MCP server was also launched over stdio with macOS's system Python 3.9.6:
+initialization, discovery of all 16 tools, device status and app listing succeeded
+against the connected bar. Existing Homebrew-based MCP configurations keep their
+stable `opt/barkeep-cli` path. Upgrade the formula and restart the MCP client to
+load the new tool catalog; an already-running client retains its old definitions.

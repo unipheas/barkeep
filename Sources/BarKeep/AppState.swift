@@ -158,6 +158,12 @@ final class AppState {
     private(set) var notificationStatus: NotificationWatcher.Status = .stopped
     private(set) var brightnessValue = "auto"
     private(set) var volumeValue = 100
+    private var confirmedBrightnessValue = "auto"
+    private var confirmedVolumeValue = 100
+    private var brightnessWriteSequence = 0
+    private var volumeWriteSequence = 0
+    private var brightnessWriteTask: Task<Void, Never>?
+    private var volumeWriteTask: Task<Void, Never>?
     private(set) var transportType = "usb"
     private(set) var wifiStateText = "unknown"
     var deviceNameText = ""
@@ -292,6 +298,8 @@ final class AppState {
         if arcade.isActive { arcade.stop() }
         connection.save(to: defaults)
         connectionRevision += 1
+        brightnessWriteTask?.cancel(); brightnessWriteTask = nil
+        volumeWriteTask?.cancel(); volumeWriteTask = nil
         notificationReplayTask?.cancel()
         notificationReplayTask = nil
         queuedNotifications.removeAll()
@@ -328,6 +336,8 @@ final class AppState {
         // Snapshot the endpoint so an in-flight refresh cannot mix USB and Wi-Fi
         // responses or overwrite the newly selected connection's state.
         let endpoint = client.snapshot()
+        let brightnessRevision = brightnessWriteSequence
+        let volumeRevision = volumeWriteSequence
         isConnecting = true
         defer { if revision == connectionRevision { isConnecting = false } }
         do {
@@ -348,8 +358,12 @@ final class AppState {
             let name = try? await endpoint.deviceName()
             guard revision == connectionRevision, !Task.isCancelled else { return }
             if let themes, !themes.isEmpty { availableThemes = themes }
-            if let brightness { brightnessValue = brightness }
-            if let volume { volumeValue = volume }
+            if let brightness, brightnessRevision == brightnessWriteSequence, brightnessWriteTask == nil {
+                brightnessValue = brightness; confirmedBrightnessValue = brightness
+            }
+            if let volume, volumeRevision == volumeWriteSequence, volumeWriteTask == nil {
+                volumeValue = volume; confirmedVolumeValue = volume
+            }
             if let wifiState { wifiStateText = wifiState }
             if let name { deviceNameText = name }
         } catch {
@@ -419,40 +433,62 @@ final class AppState {
 
     // MARK: - Device controls
 
-    func applyBrightness(_ value: String) {
+    @discardableResult
+    func applyBrightness(_ value: String) -> Task<Void, Never> {
         let revision = connectionRevision
         let endpoint = client.snapshot()
-        let previous = brightnessValue
+        brightnessWriteSequence += 1
+        let sequence = brightnessWriteSequence
+        let previousTask = brightnessWriteTask
         brightnessValue = value
-        Task {
+        let task = Task {
+            // Serialize writes and skip superseded selections that have not started.
+            await previousTask?.value
+            guard revision == connectionRevision, sequence == brightnessWriteSequence, !Task.isCancelled else { return }
+            defer { if sequence == brightnessWriteSequence { brightnessWriteTask = nil } }
             do {
                 try await endpoint.setBrightness(value)
-                guard revision == connectionRevision else { return }
+                guard revision == connectionRevision, !Task.isCancelled else { return }
+                confirmedBrightnessValue = value
+                guard sequence == brightnessWriteSequence else { return }
                 lastError = nil
             } catch {
-                guard revision == connectionRevision else { return }
-                brightnessValue = previous
+                guard revision == connectionRevision, sequence == brightnessWriteSequence, !Task.isCancelled else { return }
+                brightnessValue = confirmedBrightnessValue
                 lastError = error.localizedDescription
             }
         }
+        brightnessWriteTask = task
+        return task
     }
 
-    func applyVolume(_ value: Int) {
+    @discardableResult
+    func applyVolume(_ value: Int) -> Task<Void, Never> {
         let revision = connectionRevision
         let endpoint = client.snapshot()
-        let previous = volumeValue
+        volumeWriteSequence += 1
+        let sequence = volumeWriteSequence
+        let previousTask = volumeWriteTask
         volumeValue = value
-        Task {
+        let task = Task {
+            // Serialize writes and skip superseded selections that have not started.
+            await previousTask?.value
+            guard revision == connectionRevision, sequence == volumeWriteSequence, !Task.isCancelled else { return }
+            defer { if sequence == volumeWriteSequence { volumeWriteTask = nil } }
             do {
                 try await endpoint.setVolume(value)
-                guard revision == connectionRevision else { return }
+                guard revision == connectionRevision, !Task.isCancelled else { return }
+                confirmedVolumeValue = value
+                guard sequence == volumeWriteSequence else { return }
                 lastError = nil
             } catch {
-                guard revision == connectionRevision else { return }
-                volumeValue = previous
+                guard revision == connectionRevision, sequence == volumeWriteSequence, !Task.isCancelled else { return }
+                volumeValue = confirmedVolumeValue
                 lastError = error.localizedDescription
             }
         }
+        volumeWriteTask = task
+        return task
     }
 
     func applyDeviceName() {

@@ -198,6 +198,85 @@ final class AppStateTests: XCTestCase {
         app.lastError = nil; app.applyDeviceName(); await eventually { app.lastError != nil }
     }
 
+    @MainActor func testOlderControlFailureCannotUndoNewSelection() async {
+        for brightness in [false,true] {
+            let app=state()
+            let pending=expectation(description:"First control request pending")
+            let release=DispatchSemaphore(value:0)
+            let lock=NSLock()
+            var writes=0
+            HTTPStub.handler={ _ in
+                let count=lock.withLock { writes += 1; return writes }
+                if count == 1 { pending.fulfill(); _ = release.wait(timeout:.now()+5); return (500,Data()) }
+                return (200,Data())
+            }
+            defer { release.signal() }
+            let first=brightness ? app.applyBrightness("25") : app.applyVolume(20)
+            await fulfillment(of:[pending],timeout:2)
+            let latest=brightness ? app.applyBrightness("75") : app.applyVolume(80)
+            release.signal()
+            await first.value; await latest.value
+            XCTAssertEqual(brightness ? app.brightnessValue : String(app.volumeValue),brightness ? "75" : "80")
+            XCTAssertNil(app.lastError)
+        }
+    }
+
+    @MainActor func testRapidControlWritesCoalesceAndRollbackToLastConfirmedValue() async {
+        for brightness in [false,true] {
+            let app=state()
+            let pending=expectation(description:"First write held")
+            let release=DispatchSemaphore(value:0)
+            let lock=NSLock()
+            var values:[String]=[]
+            HTTPStub.handler={ request in
+                let query=URLComponents(url:request.url!,resolvingAgainstBaseURL:false)!.queryItems!
+                let value=query.first { $0.name == (brightness ? "value" : "volume") }!.value!
+                let count=lock.withLock { values.append(value); return values.count }
+                if count == 1 { pending.fulfill(); _ = release.wait(timeout:.now()+5); return (200,Data()) }
+                return (500,Data())
+            }
+            defer { release.signal() }
+            let first=brightness ? app.applyBrightness("25") : app.applyVolume(20)
+            await fulfillment(of:[pending],timeout:2)
+            let middle=brightness ? app.applyBrightness("50") : app.applyVolume(50)
+            let latest=brightness ? app.applyBrightness("75") : app.applyVolume(80)
+            release.signal()
+            await first.value; await middle.value; await latest.value
+            XCTAssertEqual(lock.withLock { values },brightness ? ["25","75"] : ["20","80"])
+            XCTAssertEqual(brightness ? app.brightnessValue : String(app.volumeValue),brightness ? "25" : "20")
+            XCTAssertTrue(app.lastError?.contains("500") == true)
+        }
+    }
+
+    @MainActor func testStatusRefreshCannotOverwriteNewControlSelections() async {
+        let app=state()
+        let pending=expectation(description:"Status refresh has read old control values")
+        let release=DispatchSemaphore(value:0)
+        let original=HTTPStub.handler!
+        HTTPStub.handler={ request in
+            if request.httpMethod == "GET" {
+                switch request.url!.path {
+                case "/api/display/brightness": return (200,Data(#"{"value":"10"}"#.utf8))
+                case "/api/audio/volume": return (200,Data(#"{"volume":20}"#.utf8))
+                case "/api/name":
+                    pending.fulfill(); _ = release.wait(timeout:.now()+5)
+                    return (200,Data(#"{"name":"Fixture"}"#.utf8))
+                default: break
+                }
+            }
+            return try original(request)
+        }
+        defer { release.signal() }
+        let refresh=Task { await app.refreshDeviceStatus() }
+        await fulfillment(of:[pending],timeout:2)
+        let brightness=app.applyBrightness("75"), volume=app.applyVolume(80)
+        release.signal()
+        await refresh.value; await brightness.value; await volume.value
+        XCTAssertEqual(app.brightnessValue,"75")
+        XCTAssertEqual(app.volumeValue,80)
+        XCTAssertTrue(app.deviceReachable)
+    }
+
     @MainActor func testTimersAndBusyOwnership() async {
         let app = state()
         app.startPomodoro(workMinutes:25,restMinutes:5,cycles:4)

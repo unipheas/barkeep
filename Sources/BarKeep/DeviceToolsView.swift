@@ -5,8 +5,13 @@ import SwiftUI
 struct DeviceToolsView: View {
     @Environment(AppState.self) private var state
     @State private var search = ""
-    @State private var selectedID: String? = DeviceEndpoint.all.first { $0.path == "/status" }?.id
-    @State private var model = DeviceToolsModel()
+    @State private var selectedID: String?
+    @State private var model: DeviceToolsModel
+
+    init(endpoint: DeviceEndpoint? = nil, model: DeviceToolsModel? = nil) {
+        _selectedID = State(initialValue: (endpoint ?? DeviceEndpoint.all.first { $0.path == "/status" })?.id)
+        _model = State(initialValue: model ?? DeviceToolsModel())
+    }
 
     private var selected: DeviceEndpoint? { DeviceEndpoint.all.first { $0.id == selectedID } }
     private var matches: [DeviceEndpoint] {

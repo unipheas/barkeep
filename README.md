@@ -165,7 +165,8 @@ codex mcp add barkeep \
 ```
 
 Restart ChatGPT desktop, Codex, or the IDE extension after adding the server.
-Use `/mcp` to confirm that `barkeep` is connected.
+Use `/mcp` to confirm that `barkeep` is connected. After upgrading `barkeep-cli`,
+restart the client again to load new tools such as app management.
 
 To notify the Busy Bar whenever Codex or ChatGPT desktop finishes a turn and
 waits for you, add this top-level setting to `~/.codex/config.toml`:
